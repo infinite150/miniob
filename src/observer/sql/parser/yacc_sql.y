@@ -7,7 +7,6 @@
 
 #include "common/log/log.h"
 #include "common/lang/string.h"
-#include "common/date_utils.h"
 #include "sql/parser/parse_defs.h"
 #include "sql/parser/yacc_sql.hpp"
 #include "sql/parser/lex_sql.h"
@@ -157,7 +156,6 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %token <floats> FLOAT
 %token <cstring> ID
 %token <cstring> SSS
-%token <cstring> DATE_STR
 //非终结符
 
 /** type 定义了各种解析后的结果输出的是什么类型。类型对应了 union 中的定义的成员变量名称 **/
@@ -443,17 +441,6 @@ value:
     }
     |FLOAT {
       $$ = new Value((float)$1);
-      @$ = @1;
-    }
-    |DATE_STR {
-      string s($1 + 1, strlen($1) - 2);
-      int date_val = 0;
-      if (string_to_date(s, date_val) < 0) {
-        yyerror(&@$, sql_string, sql_result, scanner, "invalid date");
-        YYERROR;
-      }
-      $$ = new Value();
-      $$->set_date(date_val);
       @$ = @1;
     }
     |SSS {

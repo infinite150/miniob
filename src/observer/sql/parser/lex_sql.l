@@ -144,7 +144,6 @@ ENCLOSED                                RETURN_TOKEN(ENCLOSED);
 "-" |
 "*" |
 "/"                                     { return yytext[0]; }
-\'[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}\'      yylval->cstring=strdup(yytext); static_cast<std::vector<char*>*>(yyextra)->push_back(yylval->cstring); RETURN_TOKEN(DATE_STR);
 \"[^"]*\"                               yylval->cstring = strdup(yytext); static_cast<std::vector<char*>*>(yyextra)->push_back(yylval->cstring); RETURN_TOKEN(SSS);
 '[^']*\'                                yylval->cstring = strdup(yytext); static_cast<std::vector<char*>*>(yyextra)->push_back(yylval->cstring); RETURN_TOKEN(SSS);
 

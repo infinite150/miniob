@@ -103,15 +103,25 @@ RC DefaultConditionFilter::init(Table &table, const ConditionSqlNode &condition)
     right.attr_offset = 0;
   }
 
-  // 校验和转换
-  //  if (!field_type_compare_compatible_table[type_left][type_right]) {
-  //    // 不能比较的两个字段， 要把信息传给客户端
-  //    return RC::SCHEMA_FIELD_TYPE_MISMATCH;
-  //  }
-  // NOTE：这里没有实现不同类型的数据比较，比如整数跟浮点数之间的对比
-  // 但是选手们还是要实现。这个功能在预选赛中会出现
+  // 校验和转换：DATE 与 CHARS 时，将 CHARS 转为 DATE（非法日期返回 FAILURE，非语法错误）
   if (type_left != type_right) {
-    return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    if ((type_left == AttrType::DATES && type_right == AttrType::CHARS) ||
+        (type_left == AttrType::CHARS && type_right == AttrType::DATES)) {
+      ConDesc *chars_desc = (type_right == AttrType::CHARS) ? &right : &left;
+      Value    converted;
+      RC       rc = Value::cast_to(chars_desc->value, AttrType::DATES, converted);
+      if (rc != RC::SUCCESS) {
+        return rc;  // 非法日期字符串 -> INVALID_ARGUMENT -> 客户端 FAILURE
+      }
+      chars_desc->value = converted;
+      if (type_right == AttrType::CHARS) {
+        type_right = AttrType::DATES;
+      } else {
+        type_left = AttrType::DATES;
+      }
+    } else {
+      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    }
   }
 
   return init(left, right, type_left, condition.comp);
