@@ -15,6 +15,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/db/db.h"
 
 #include <fcntl.h>
+#include <cstdio>
 #include <sys/stat.h>
 
 #include "common/lang/string.h"
@@ -173,6 +174,51 @@ RC Db::create_table(const char *table_name, span<const AttrInfoSqlNode> attribut
 
   opened_tables_[table_name] = table;
   LOG_INFO("Create table success. table name=%s, table_id:%d", table_name, table_id);
+  return RC::SUCCESS;
+}
+
+RC Db::drop_table(const char *table_name)
+{
+  auto it = opened_tables_.find(table_name);
+  if (it == opened_tables_.end()) {
+    LOG_WARN("Table not found. table_name=%s", table_name);
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+
+  Table *table = it->second;
+  const TableMeta &table_meta = table->table_meta();
+  string name = table_meta.name();
+  vector<string> index_names;
+  for (int i = 0; i < table_meta.index_num(); i++) {
+    index_names.push_back(table_meta.index(i)->name());
+  }
+
+  // 从 opened_tables_ 中移除并删除表对象（析构会关闭 buffer pool、索引等内存资源）
+  opened_tables_.erase(it);
+  delete table;
+  table = nullptr;
+
+  // 删除磁盘文件：元数据、数据文件、各索引文件、LOB 文件
+  string meta_path = table_meta_file(path_.c_str(), name.c_str());
+  if (std::remove(meta_path.c_str()) != 0) {
+    LOG_WARN("Failed to remove table meta file. path=%s", meta_path.c_str());
+  }
+  string data_path = table_data_file(path_.c_str(), name.c_str());
+  if (std::remove(data_path.c_str()) != 0) {
+    LOG_WARN("Failed to remove table data file. path=%s", data_path.c_str());
+  }
+  for (const string &index_name : index_names) {
+    string index_path = table_index_file(path_.c_str(), name.c_str(), index_name.c_str());
+    if (std::remove(index_path.c_str()) != 0) {
+      LOG_WARN("Failed to remove index file. path=%s", index_path.c_str());
+    }
+  }
+  string lob_path = table_lob_file(path_.c_str(), name.c_str());
+  if (std::remove(lob_path.c_str()) != 0) {
+    // LOB 文件可能不存在，忽略错误
+  }
+
+  LOG_INFO("Drop table success. table name=%s", table_name);
   return RC::SUCCESS;
 }
 

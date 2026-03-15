@@ -71,6 +71,12 @@ public:
       const StorageFormat storage_format = StorageFormat::ROW_FORMAT);
 
   /**
+   * @brief 删除表，释放内存与磁盘资源（元数据、数据文件、索引文件等）
+   * @param table_name 表名
+   */
+  RC drop_table(const char *table_name);
+
+  /**
    * @brief 根据表名查找表
    */
   Table *find_table(const char *table_name) const;
