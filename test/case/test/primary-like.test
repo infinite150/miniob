@@ -1,0 +1,16 @@
+-- echo initialization
+CREATE TABLE like_table(id int, name char(30));
+
+-- echo 1. basic like test
+insert into like_table VALUES (0, 'cherry');
+insert into like_table VALUES (1, 'apple');
+insert into like_table VALUES (2, 'mango');
+insert into like_table VALUES (3, 'strawberry');
+-- sort SELECT * FROM like_table WHERE name LIKE 'c%';
+
+-- echo 2. single char wildcard
+-- sort SELECT * FROM like_table WHERE name LIKE '_pple';
+
+-- echo 3. no match
+-- sort SELECT * FROM like_table WHERE name LIKE 'z%';
+

@@ -155,6 +155,51 @@ bool DefaultConditionFilter::filter(const Record &rec) const
     case LESS_THAN: return cmp_result < 0;
     case GREAT_EQUAL: return cmp_result >= 0;
     case GREAT_THAN: return cmp_result > 0;
+    case LIKE_OP: {
+      if (left_value.attr_type() != AttrType::CHARS || right_value.attr_type() != AttrType::CHARS) {
+        LOG_WARN("LIKE only supports CHARS type");
+        return false;
+      }
+      const std::string &text    = left_value.get_string();
+      const std::string &pattern = right_value.get_string();
+
+      size_t i = 0;
+      size_t j = 0;
+      size_t star_i = std::string::npos;
+      size_t star_j = std::string::npos;
+
+      auto match_char = [](char c, char p) -> bool {
+        if (p == '_') {
+          return c != '\'';
+        }
+        return c == p;
+      };
+
+      while (i < text.size()) {
+        if (j < pattern.size() && pattern[j] == '%') {
+          star_i = i;
+          star_j = ++j;
+        } else if (j < pattern.size() && match_char(text[i], pattern[j])) {
+          ++i;
+          ++j;
+        } else if (star_j != std::string::npos) {
+          if (text[star_i] == '\'') {
+            star_j = std::string::npos;
+          } else {
+            ++star_i;
+            i = star_i;
+            j = star_j;
+          }
+        } else {
+          return false;
+        }
+      }
+
+      while (j < pattern.size() && pattern[j] == '%') {
+        ++j;
+      }
+      return j == pattern.size();
+    }
 
     default: break;
   }

@@ -142,31 +142,82 @@ ComparisonExpr::~ComparisonExpr() {}
 RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &result) const
 {
   RC  rc         = RC::SUCCESS;
-  int cmp_result = left.compare(right);
   result         = false;
-  switch (comp_) {
-    case EQUAL_TO: {
-      result = (0 == cmp_result);
-    } break;
-    case LESS_EQUAL: {
-      result = (cmp_result <= 0);
-    } break;
-    case NOT_EQUAL: {
-      result = (cmp_result != 0);
-    } break;
-    case LESS_THAN: {
-      result = (cmp_result < 0);
-    } break;
-    case GREAT_EQUAL: {
-      result = (cmp_result >= 0);
-    } break;
-    case GREAT_THAN: {
-      result = (cmp_result > 0);
-    } break;
-    default: {
-      LOG_WARN("unsupported comparison. %d", comp_);
-      rc = RC::INTERNAL;
-    } break;
+  if (comp_ == LIKE_OP) {
+    if (left.attr_type() != AttrType::CHARS || right.attr_type() != AttrType::CHARS) {
+      LOG_WARN("LIKE only supports CHARS type");
+      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    }
+
+    const std::string &text    = left.get_string();
+    const std::string &pattern = right.get_string();
+
+    // 简单通配符匹配：% 匹配0到多个非单引号字符，_ 匹配1个非单引号字符
+    size_t i = 0;
+    size_t j = 0;
+    size_t star_i = std::string::npos;
+    size_t star_j = std::string::npos;
+
+    auto match_char = [](char c, char p) -> bool {
+      if (p == '_') {
+        return c != '\'';
+      }
+      return c == p;
+    };
+
+    while (i < text.size()) {
+      if (j < pattern.size() && pattern[j] == '%') {
+        star_i = i;
+        star_j = ++j;
+      } else if (j < pattern.size() && match_char(text[i], pattern[j])) {
+        ++i;
+        ++j;
+      } else if (star_j != std::string::npos) {
+        if (text[star_i] == '\'') {
+          // % 不能匹配单引号，跳过这个失败分支
+          star_j = std::string::npos;
+        } else {
+          ++star_i;
+          i = star_i;
+          j = star_j;
+        }
+      } else {
+        result = false;
+        return rc;
+      }
+    }
+
+    while (j < pattern.size() && pattern[j] == '%') {
+      ++j;
+    }
+    result = (j == pattern.size());
+    return rc;
+  } else {
+    int cmp_result = left.compare(right);
+    switch (comp_) {
+      case EQUAL_TO: {
+        result = (0 == cmp_result);
+      } break;
+      case LESS_EQUAL: {
+        result = (cmp_result <= 0);
+      } break;
+      case NOT_EQUAL: {
+        result = (cmp_result != 0);
+      } break;
+      case LESS_THAN: {
+        result = (cmp_result < 0);
+      } break;
+      case GREAT_EQUAL: {
+        result = (cmp_result >= 0);
+      } break;
+      case GREAT_THAN: {
+        result = (cmp_result > 0);
+      } break;
+      default: {
+        LOG_WARN("unsupported comparison. %d", comp_);
+        rc = RC::INTERNAL;
+      } break;
+    }
   }
 
   return rc;

@@ -1,0 +1,26 @@
+INITIALIZATION
+CREATE TABLE like_table(id int, name char(30));
+SUCCESS
+
+1. BASIC LIKE TEST
+insert into like_table VALUES (0, 'cherry');
+SUCCESS
+insert into like_table VALUES (1, 'apple');
+SUCCESS
+insert into like_table VALUES (2, 'mango');
+SUCCESS
+insert into like_table VALUES (3, 'strawberry');
+SUCCESS
+SELECT * FROM like_table WHERE name LIKE 'c%';
+0 | CHERRY
+LIKE_TABLE.ID | LIKE_TABLE.NAME
+
+2. SINGLE CHAR WILDCARD
+SELECT * FROM like_table WHERE name LIKE '_pple';
+1 | APPLE
+LIKE_TABLE.ID | LIKE_TABLE.NAME
+
+3. NO MATCH
+SELECT * FROM like_table WHERE name LIKE 'z%';
+LIKE_TABLE.ID | LIKE_TABLE.NAME
+
