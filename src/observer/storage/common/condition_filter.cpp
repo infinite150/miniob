@@ -155,7 +155,8 @@ bool DefaultConditionFilter::filter(const Record &rec) const
     case LESS_THAN: return cmp_result < 0;
     case GREAT_EQUAL: return cmp_result >= 0;
     case GREAT_THAN: return cmp_result > 0;
-    case LIKE_OP: {
+    case LIKE_OP:
+    case NOT_LIKE_OP: {
       if (left_value.attr_type() != AttrType::CHARS || right_value.attr_type() != AttrType::CHARS) {
         LOG_WARN("LIKE only supports CHARS type");
         return false;
@@ -198,7 +199,11 @@ bool DefaultConditionFilter::filter(const Record &rec) const
       while (j < pattern.size() && pattern[j] == '%') {
         ++j;
       }
-      return j == pattern.size();
+      bool like_match = (j == pattern.size());
+      if (comp_op_ == LIKE_OP) {
+        return like_match;
+      }
+      return !like_match;
     }
 
     default: break;

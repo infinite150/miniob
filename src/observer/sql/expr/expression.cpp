@@ -143,7 +143,7 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
 {
   RC  rc         = RC::SUCCESS;
   result         = false;
-  if (comp_ == LIKE_OP) {
+  if (comp_ == LIKE_OP || comp_ == NOT_LIKE_OP) {
     if (left.attr_type() != AttrType::CHARS || right.attr_type() != AttrType::CHARS) {
       LOG_WARN("LIKE only supports CHARS type");
       return RC::SCHEMA_FIELD_TYPE_MISMATCH;
@@ -190,7 +190,12 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
     while (j < pattern.size() && pattern[j] == '%') {
       ++j;
     }
-    result = (j == pattern.size());
+    bool like_match = (j == pattern.size());
+    if (comp_ == LIKE_OP) {
+      result = like_match;
+    } else {  // NOT_LIKE_OP
+      result = !like_match;
+    }
     return rc;
   } else {
     int cmp_result = left.compare(right);
