@@ -29,6 +29,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/index/index.h"
 #include "storage/record/record_manager.h"
 #include "storage/table/table.h"
+#include "common/value.h"
 #include "storage/trx/trx.h"
 #include "storage/record/heap_record_scanner.h"
 #include "storage/record/lsm_record_scanner.h"
@@ -256,9 +257,14 @@ RC Table::set_value_to_record(char *record_data, const Value &value, const Field
   size_t       copy_len = field->len();
   const size_t data_len = value.length();
   if (field->type() == AttrType::CHARS) {
-    if (copy_len > data_len) {
-      copy_len = data_len + 1;
+    // 字符串长度不能超过字段声明长度（预留 1 字节存 '\0'）
+    if (data_len + 1 > copy_len) {
+      LOG_WARN("string value is too long. table=%s field=%s field_len=%zu value_len=%zu",
+          table_meta_.name(), field->name(), copy_len, data_len);
+      return RC::INVALID_ARGUMENT;
     }
+    // 实际拷贝内容长度为数据长度+结尾 '\0'
+    copy_len = data_len + 1;
   }
   memcpy(record_data + field->offset(), value.data(), copy_len);
   return RC::SUCCESS;
@@ -291,6 +297,23 @@ Index *Table::find_index(const char *index_name) const
 Index *Table::find_index_by_field(const char *field_name) const
 {
   return engine_->find_index_by_field(field_name);
+}
+
+RC Table::update_record_field(Record &record, const FieldMeta *field_meta, const Value &value)
+{
+  RC   rc          = RC::SUCCESS;
+  Value target_val = value;
+
+  if (field_meta->type() != value.attr_type()) {
+    rc = Value::cast_to(value, field_meta->type(), target_val);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to cast value when update record field. table=%s field=%s",
+          table_meta_.name(), field_meta->name());
+      return rc;
+    }
+  }
+
+  return set_value_to_record(record.data(), target_val, field_meta);
 }
 
 RC Table::sync()

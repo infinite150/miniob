@@ -131,6 +131,11 @@ public:
   Index *find_index(const char *index_name) const;
   Index *find_index_by_field(const char *field_name) const;
 
+  /**
+   * @brief 更新一条记录中的某个字段
+   */
+  RC update_record_field(Record &record, const FieldMeta *field_meta, const Value &value);
+
 private:
   Db       *db_ = nullptr;
   TableMeta table_meta_;
