@@ -30,6 +30,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/record/record_manager.h"
 #include "storage/table/table.h"
 #include "storage/trx/trx.h"
+#include "common/value.h"
 #include "storage/record/heap_record_scanner.h"
 #include "storage/record/lsm_record_scanner.h"
 #include "storage/table/heap_table_engine.h"
@@ -291,6 +292,23 @@ Index *Table::find_index(const char *index_name) const
 Index *Table::find_index_by_field(const char *field_name) const
 {
   return engine_->find_index_by_field(field_name);
+}
+
+RC Table::update_record_field(Record &record, const FieldMeta *field_meta, const Value &value)
+{
+  RC   rc          = RC::SUCCESS;
+  Value target_val = value;
+
+  if (field_meta->type() != value.attr_type()) {
+    rc = Value::cast_to(value, field_meta->type(), target_val);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to cast value when update record field. table=%s field=%s",
+          table_meta_.name(), field_meta->name());
+      return rc;
+    }
+  }
+
+  return set_value_to_record(record.data(), target_val, field_meta);
 }
 
 RC Table::sync()
