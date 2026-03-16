@@ -456,6 +456,10 @@ public:
   const char *aggregate_name() const { return aggregate_name_.c_str(); }
 
   unique_ptr<Expression> &child() { return child_; }
+  const unique_ptr<Expression> &child() const { return child_; }
+
+  void set_invalid_args(bool invalid) { invalid_args_ = invalid; }
+  bool invalid_args() const { return invalid_args_; }
 
   RC       get_value(const Tuple &tuple, Value &value) const override { return RC::INTERNAL; }
   AttrType value_type() const override { return child_->value_type(); }
@@ -463,6 +467,7 @@ public:
 private:
   string                 aggregate_name_;
   unique_ptr<Expression> child_;
+  bool                   invalid_args_ = false;
 };
 
 class AggregateExpr : public Expression

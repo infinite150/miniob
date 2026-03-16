@@ -577,6 +577,19 @@ aggregate_expression:
     ID LBRACE expression RBRACE {
       $$ = create_aggregate_expression($1, $3, sql_string, &@$);
     }
+    | ID LBRACE expression COMMA expression_list RBRACE {
+      UnboundAggregateExpr *expr = create_aggregate_expression($1, $3, sql_string, &@$);
+      expr->set_invalid_args(true);
+      $$ = expr;
+      if ($5 != nullptr) {
+        delete $5;
+      }
+    }
+    | ID LBRACE RBRACE {
+      UnboundAggregateExpr *expr = create_aggregate_expression($1, nullptr, sql_string, &@$);
+      expr->set_invalid_args(true);
+      $$ = expr;
+    }
     ;
 
 rel_attr:
