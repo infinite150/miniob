@@ -130,6 +130,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
         FIELDS
         TERMINATED
         ENCLOSED
+        IS
         EQ
         LT
         GT
@@ -206,6 +207,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
 %type <rel_attr>            rel_attr
 %type <attr_infos>          attr_def_list
 %type <attr_info>           attr_def
+%type <number>              opt_nullability
 %type <value_list>          value_list
 %type <condition_list>      where
 %type <condition_list>      condition_list
@@ -428,19 +430,36 @@ attr_def_list:
     ;
     
 attr_def:
-    ID type LBRACE number RBRACE 
+    ID type LBRACE number RBRACE opt_nullability
     {
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
       $$->name = $1;
       $$->length = $4;
+      $$->nullable = ($6 != 0);
     }
-    | ID type
+    | ID type opt_nullability
     {
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
       $$->name = $1;
       $$->length = 4;
+      $$->nullable = ($3 != 0);
+    }
+    ;
+
+opt_nullability:
+    /* empty */
+    {
+      $$ = 0; // default: NOT NULL
+    }
+    | NULL_T
+    {
+      $$ = 1;
+    }
+    | NOT NULL_T
+    {
+      $$ = 0;
     }
     ;
 number:
@@ -784,6 +803,12 @@ condition_expr:
       children.push_back(unique_ptr<Expression>($1));
       children.push_back(unique_ptr<Expression>($3));
       $$ = new ConjunctionExpr(ConjunctionExpr::Type::OR, children);
+    }
+    | expression IS NULL_T {
+      $$ = new IsNullExpr(unique_ptr<Expression>($1), false);
+    }
+    | expression IS NOT NULL_T {
+      $$ = new IsNullExpr(unique_ptr<Expression>($1), true);
     }
     | expression comp_op expression {
       $$ = new ComparisonExpr($2, unique_ptr<Expression>($1), unique_ptr<Expression>($3));

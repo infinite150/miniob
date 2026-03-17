@@ -198,6 +198,18 @@ public:
     FieldExpr       *field_expr = speces_[index];
     const FieldMeta *field_meta = field_expr->field().meta();
     cell.reset();
+
+    const TableMeta &table_meta = table_->table_meta();
+    const int        bitmap_offset = table_meta.null_bitmap_offset();
+    const uint8_t   *bitmap = reinterpret_cast<const uint8_t *>(this->record_->data() + bitmap_offset);
+    const int        byte_index = index / 8;
+    const int        bit_index  = index % 8;
+    const bool       is_null = (bitmap[byte_index] & static_cast<uint8_t>(1U << bit_index)) != 0;
+    if (is_null) {
+      cell.set_null();
+      return RC::SUCCESS;
+    }
+
     cell.set_type(field_meta->type());
     cell.set_data(this->record_->data() + field_meta->offset(), field_meta->len());
     return RC::SUCCESS;

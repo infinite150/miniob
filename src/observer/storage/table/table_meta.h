@@ -64,6 +64,8 @@ public:
   const vector<string> &primary_keys() const { return primary_keys_; }
 
   int record_size() const;
+  int null_bitmap_bytes() const { return (field_num() + 7) / 8; }
+  int null_bitmap_offset() const { return record_size_ - null_bitmap_bytes(); }
 
 public:
   int  serialize(ostream &os) const override;

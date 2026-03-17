@@ -46,6 +46,37 @@ RC FieldExpr::get_value(const Tuple &tuple, Value &value) const
   return tuple.find_cell(TupleCellSpec(table_name(), field_name()), value);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+RC IsNullExpr::get_value(const Tuple &tuple, Value &value) const
+{
+  Value child_value;
+  RC rc = child_->get_value(tuple, child_value);
+  if (rc != RC::SUCCESS) {
+    return rc;
+  }
+  bool result = value_is_null(child_value);
+  if (is_not_) {
+    result = !result;
+  }
+  value.set_boolean(result);
+  return RC::SUCCESS;
+}
+
+RC IsNullExpr::try_get_value(Value &value) const
+{
+  Value child_value;
+  RC rc = child_->try_get_value(child_value);
+  if (rc != RC::SUCCESS) {
+    return rc;
+  }
+  bool result = value_is_null(child_value);
+  if (is_not_) {
+    result = !result;
+  }
+  value.set_boolean(result);
+  return RC::SUCCESS;
+}
+
 bool FieldExpr::equal(const Expression &other) const
 {
   if (this == &other) {

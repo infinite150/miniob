@@ -49,6 +49,7 @@ enum class ExprType
   VALUE,        ///< 常量值
   CAST,         ///< 需要做类型转换的表达式
   COMPARISON,   ///< 需要做比较的表达式
+  IS_NULL,      ///< IS NULL / IS NOT NULL
   CONJUNCTION,  ///< 多个表达式使用同一种关系(AND或OR)来联结
   ARITHMETIC,   ///< 算术运算
   AGGREGATION,  ///< 聚合运算
@@ -344,6 +345,32 @@ private:
   CompOp                 comp_;
   unique_ptr<Expression> left_;
   unique_ptr<Expression> right_;
+};
+
+/**
+ * @brief IS NULL / IS NOT NULL 表达式
+ * @ingroup Expression
+ */
+class IsNullExpr : public Expression
+{
+public:
+  IsNullExpr(unique_ptr<Expression> child, bool is_not) : child_(std::move(child)), is_not_(is_not) {}
+  virtual ~IsNullExpr() = default;
+
+  unique_ptr<Expression> copy() const override { return make_unique<IsNullExpr>(child_->copy(), is_not_); }
+  ExprType type() const override { return ExprType::IS_NULL; }
+  AttrType value_type() const override { return AttrType::BOOLEANS; }
+
+  RC get_value(const Tuple &tuple, Value &value) const override;
+  RC try_get_value(Value &value) const override;
+
+  unique_ptr<Expression> &child() { return child_; }
+  const unique_ptr<Expression> &child() const { return child_; }
+  bool is_not() const { return is_not_; }
+
+private:
+  unique_ptr<Expression> child_;
+  bool                   is_not_ = false;
 };
 
 /**

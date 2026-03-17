@@ -225,9 +225,35 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
   char *record_data = (char *)malloc(record_size);
   memset(record_data, 0, record_size);
 
+  auto set_null_bit = [&](int field_index, bool is_null) {
+    const int bitmap_offset = table_meta_.null_bitmap_offset();
+    const int byte_index    = field_index / 8;
+    const int bit_index     = field_index % 8;
+    uint8_t  &b             = reinterpret_cast<uint8_t *>(record_data + bitmap_offset)[byte_index];
+    if (is_null) {
+      b |= static_cast<uint8_t>(1U << bit_index);
+    } else {
+      b &= static_cast<uint8_t>(~(1U << bit_index));
+    }
+  };
+
   for (int i = 0; i < value_num && OB_SUCC(rc); i++) {
     const FieldMeta *field = table_meta_.field(i + normal_field_start_index);
     const Value &    value = values[i];
+
+    // NULL value: check nullable constraint and set bitmap
+    if (value.is_null()) {
+      if (!field->nullable()) {
+        LOG_WARN("field does not allow NULL. table=%s field=%s", table_meta_.name(), field->name());
+        rc = RC::INVALID_ARGUMENT;
+        break;
+      }
+      set_null_bit(i + normal_field_start_index, true);
+      continue;
+    } else {
+      set_null_bit(i + normal_field_start_index, false);
+    }
+
     if (field->type() != value.attr_type()) {
       Value real_value;
       rc = Value::cast_to(value, field->type(), real_value);
