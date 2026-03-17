@@ -68,6 +68,16 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update, Stmt *&stmt)
         return RC::INVALID_ARGUMENT;
       }
       Value value_to_set = p.second;
+      // NULL assignment: only allowed when column is nullable, and no cast is needed
+      if (value_to_set.is_null()) {
+        if (!field_meta->nullable()) {
+          LOG_WARN("field does not allow NULL. table=%s, field=%s", table_name, field_name);
+          return RC::INVALID_ARGUMENT;
+        }
+        field_metas.push_back(field_meta);
+        values_to_set.push_back(std::move(value_to_set));
+        continue;
+      }
       if (field_meta->type() != value_to_set.attr_type()) {
         Value casted;
         rc = Value::cast_to(value_to_set, field_meta->type(), casted);
@@ -102,17 +112,28 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update, Stmt *&stmt)
       return RC::INVALID_ARGUMENT;
     }
     Value value_to_set = update.value;
-    if (field_meta->type() != value_to_set.attr_type()) {
-      Value casted;
-      rc = Value::cast_to(value_to_set, field_meta->type(), casted);
-      if (OB_FAIL(rc)) {
-        LOG_WARN("field type mismatch. table=%s, field=%s", table_name, field_name);
-        return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    // NULL assignment: only allowed when column is nullable, and no cast is needed
+    if (value_to_set.is_null()) {
+      if (!field_meta->nullable()) {
+        LOG_WARN("field does not allow NULL. table=%s, field=%s", table_name, field_name);
+        return RC::INVALID_ARGUMENT;
       }
-      value_to_set = std::move(casted);
+      field_metas.push_back(field_meta);
+      values_to_set.push_back(std::move(value_to_set));
+      // filter_stmt will be handled below
+    } else {
+      if (field_meta->type() != value_to_set.attr_type()) {
+        Value casted;
+        rc = Value::cast_to(value_to_set, field_meta->type(), casted);
+        if (OB_FAIL(rc)) {
+          LOG_WARN("field type mismatch. table=%s, field=%s", table_name, field_name);
+          return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+        }
+        value_to_set = std::move(casted);
+      }
+      field_metas.push_back(field_meta);
+      values_to_set.push_back(std::move(value_to_set));
     }
-    field_metas.push_back(field_meta);
-    values_to_set.push_back(std::move(value_to_set));
   }
 
   Table *table = db->find_table(table_name);
