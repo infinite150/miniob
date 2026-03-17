@@ -233,6 +233,13 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
                                     ? static_cast<Expression *>(new FieldExpr(filter_obj_left.field))
                                     : static_cast<Expression *>(new ValueExpr(filter_obj_left.value)));
 
+    // IS NULL / IS NOT NULL: build dedicated expression without implicit casts
+    if (filter_unit->comp() == IS_NULL_OP || filter_unit->comp() == IS_NOT_NULL_OP) {
+      const bool is_not = (filter_unit->comp() == IS_NOT_NULL_OP);
+      cmp_exprs.emplace_back(new IsNullExpr(std::move(left), is_not));
+      continue;
+    }
+
     unique_ptr<Expression> right(filter_obj_right.is_attr
                                      ? static_cast<Expression *>(new FieldExpr(filter_obj_right.field))
                                      : static_cast<Expression *>(new ValueExpr(filter_obj_right.value)));

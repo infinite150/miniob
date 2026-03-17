@@ -227,6 +227,8 @@ bool DefaultConditionFilter::filter(const Record &rec) const
   int cmp_result = left_value.compare(right_value);
 
   switch (comp_op_) {
+    case IS_NULL_OP: return left_value.is_null();
+    case IS_NOT_NULL_OP: return !left_value.is_null();
     case EQUAL_TO: return 0 == cmp_result;
     case LESS_EQUAL: return cmp_result <= 0;
     case NOT_EQUAL: return cmp_result != 0;

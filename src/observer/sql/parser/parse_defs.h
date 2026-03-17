@@ -57,6 +57,8 @@ enum CompOp
   NOT_IN_OP,    ///< not in (sub query)
   EXISTS_OP,    ///< exists (sub query)
   NOT_EXISTS_OP,///< not exists (sub query)
+  IS_NULL_OP,   ///< is null
+  IS_NOT_NULL_OP,///< is not null
   NO_OP
 };
 

@@ -957,6 +957,28 @@ condition:
       delete $1;
       delete $3;
     }
+    | rel_attr IS NULL_T
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 1;
+      $$->left_attr = *$1;
+      $$->right_is_attr = 0;
+      $$->right_value.set_null();
+      $$->comp = IS_NULL_OP;
+
+      delete $1;
+    }
+    | rel_attr IS NOT NULL_T
+    {
+      $$ = new ConditionSqlNode;
+      $$->left_is_attr = 1;
+      $$->left_attr = *$1;
+      $$->right_is_attr = 0;
+      $$->right_value.set_null();
+      $$->comp = IS_NOT_NULL_OP;
+
+      delete $1;
+    }
     | value comp_op value 
     {
       $$ = new ConditionSqlNode;

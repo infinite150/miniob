@@ -19,6 +19,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/common/column.h"
 #include "common/type/data_type.h"
 #include <cmath>
+#include <cfenv>
 #include <functional>
 #include <regex>
 #include <string>
@@ -981,17 +982,26 @@ RC FunctionExpr::eval_length(const Value &arg, Value &result) const
 
 RC FunctionExpr::eval_round(const Value &arg, Value &result) const
 {
+  if (arg.is_null()) {
+    result.set_null();
+    return RC::SUCCESS;
+  }
   if (arg.attr_type() != AttrType::FLOATS) {
     return RC::INVALID_ARGUMENT;
   }
   float val = arg.get_float();
-  int rounded = static_cast<int>(roundf(val));
+  // Banker's rounding (ties to even), to match expected results
+  int rounded = static_cast<int>(nearbyintf(val));
   result.set_int(rounded);
   return RC::SUCCESS;
 }
 
 RC FunctionExpr::eval_round(const Value &arg, const Value &precision_arg, Value &result) const
 {
+  if (arg.is_null()) {
+    result.set_null();
+    return RC::SUCCESS;
+  }
   if (arg.attr_type() != AttrType::FLOATS) {
     return RC::INVALID_ARGUMENT;
   }
@@ -1008,7 +1018,8 @@ RC FunctionExpr::eval_round(const Value &arg, const Value &precision_arg, Value 
   }
   float val = arg.get_float();
   float factor = powf(10.0f, static_cast<float>(prec));
-  float rounded = roundf(val * factor) / factor;
+  // Banker's rounding (ties to even)
+  float rounded = nearbyintf(val * factor) / factor;
   result.set_float(rounded);
   return RC::SUCCESS;
 }
@@ -1016,13 +1027,12 @@ RC FunctionExpr::eval_round(const Value &arg, const Value &precision_arg, Value 
 RC FunctionExpr::eval_date_format(const Value &date_val, const Value &format_val, Value &result) const
 {
   Value actual_date;
+  if (date_val.is_null()) {
+    result.set_null();
+    return RC::SUCCESS;
+  }
   if (date_val.attr_type() == AttrType::DATES) {
     actual_date = date_val;
-  } else if (date_val.attr_type() == AttrType::CHARS) {
-    RC rc = DataType::type_instance(AttrType::DATES)->set_value_from_str(actual_date, date_val.get_string());
-    if (rc != RC::SUCCESS) {
-      return RC::INVALID_ARGUMENT;
-    }
   } else {
     return RC::INVALID_ARGUMENT;
   }
