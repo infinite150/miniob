@@ -52,7 +52,8 @@ RC SumAggregator::accumulate(const Value &value)
 RC SumAggregator::evaluate(Value &result)
 {
   if (value_.attr_type() == AttrType::UNDEFINED) {
-    result.set_int(0);
+    // SQL semantics: SUM over empty set (or all NULLs) returns NULL
+    result.reset();
     return RC::SUCCESS;
   }
   result = value_;
