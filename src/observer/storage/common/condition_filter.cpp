@@ -59,6 +59,7 @@ RC DefaultConditionFilter::init(const ConDesc &left, const ConDesc &right, AttrT
 RC DefaultConditionFilter::init(Table &table, const ConditionSqlNode &condition)
 {
   const TableMeta &table_meta = table.table_meta();
+  null_bitmap_offset_         = table_meta.null_bitmap_offset();
   ConDesc          left;
   ConDesc          right;
 
@@ -74,6 +75,17 @@ RC DefaultConditionFilter::init(Table &table, const ConditionSqlNode &condition)
     }
     left.attr_length = field_left->len();
     left.attr_offset = field_left->offset();
+    // compute field index for null bitmap lookup
+    left.field_index = -1;
+    const auto *fields = table_meta.field_metas();
+    if (fields != nullptr) {
+      for (int i = 0; i < static_cast<int>(fields->size()); i++) {
+        if (&(*fields)[i] == field_left) {
+          left.field_index = i;
+          break;
+        }
+      }
+    }
 
     type_left = field_left->type();
   } else {
@@ -83,6 +95,7 @@ RC DefaultConditionFilter::init(Table &table, const ConditionSqlNode &condition)
 
     left.attr_length = 0;
     left.attr_offset = 0;
+    left.field_index = -1;
   }
 
   if (1 == condition.right_is_attr) {
@@ -94,6 +107,16 @@ RC DefaultConditionFilter::init(Table &table, const ConditionSqlNode &condition)
     }
     right.attr_length = field_right->len();
     right.attr_offset = field_right->offset();
+    right.field_index = -1;
+    const auto *fields = table_meta.field_metas();
+    if (fields != nullptr) {
+      for (int i = 0; i < static_cast<int>(fields->size()); i++) {
+        if (&(*fields)[i] == field_right) {
+          right.field_index = i;
+          break;
+        }
+      }
+    }
     type_right        = field_right->type();
   } else {
     right.is_attr = false;
@@ -102,6 +125,7 @@ RC DefaultConditionFilter::init(Table &table, const ConditionSqlNode &condition)
 
     right.attr_length = 0;
     right.attr_offset = 0;
+    right.field_index = -1;
   }
 
   // 校验和转换
@@ -112,6 +136,16 @@ RC DefaultConditionFilter::init(Table &table, const ConditionSqlNode &condition)
   // NOTE：这里原来没有实现不同类型的数据比较，比如整数跟浮点数之间的对比。
   // 这里针对 DATE 与 CHARS 的组合做特殊处理：当字段是 DATE，而常量是字符串时，
   // 尝试把字符串解析成 DATE；解析失败则认为类型不匹配。
+  // NULL literal: allow comparison with any type, and it should always evaluate to false in filter().
+  if (type_left == AttrType::UNDEFINED && type_right != AttrType::UNDEFINED) {
+    type_left = type_right;
+  } else if (type_right == AttrType::UNDEFINED && type_left != AttrType::UNDEFINED) {
+    type_right = type_left;
+  } else if (type_left == AttrType::UNDEFINED && type_right == AttrType::UNDEFINED) {
+    // NULL vs NULL: choose an arbitrary comparable type; result will still be false due to NULL semantics.
+    type_left = type_right = AttrType::INTS;
+  }
+
   if (type_left != type_right) {
     RC rc = RC::SUCCESS;
 
@@ -155,15 +189,37 @@ bool DefaultConditionFilter::filter(const Record &rec) const
   Value right_value;
 
   if (left_.is_attr) {  // value
-    left_value.set_type(attr_type_);
-    left_value.set_data(rec.data() + left_.attr_offset, left_.attr_length);
+    bool is_null = false;
+    if (null_bitmap_offset_ >= 0 && left_.field_index >= 0) {
+      const uint8_t *bitmap = reinterpret_cast<const uint8_t *>(rec.data() + null_bitmap_offset_);
+      const int      byte_index = left_.field_index / 8;
+      const int      bit_index  = left_.field_index % 8;
+      is_null = (bitmap[byte_index] & static_cast<uint8_t>(1U << bit_index)) != 0;
+    }
+    if (is_null) {
+      left_value.set_null();
+    } else {
+      left_value.set_type(attr_type_);
+      left_value.set_data(rec.data() + left_.attr_offset, left_.attr_length);
+    }
   } else {
     left_value.set_value(left_.value);
   }
 
   if (right_.is_attr) {
-    right_value.set_type(attr_type_);
-    right_value.set_data(rec.data() + right_.attr_offset, right_.attr_length);
+    bool is_null = false;
+    if (null_bitmap_offset_ >= 0 && right_.field_index >= 0) {
+      const uint8_t *bitmap = reinterpret_cast<const uint8_t *>(rec.data() + null_bitmap_offset_);
+      const int      byte_index = right_.field_index / 8;
+      const int      bit_index  = right_.field_index % 8;
+      is_null = (bitmap[byte_index] & static_cast<uint8_t>(1U << bit_index)) != 0;
+    }
+    if (is_null) {
+      right_value.set_null();
+    } else {
+      right_value.set_type(attr_type_);
+      right_value.set_data(rec.data() + right_.attr_offset, right_.attr_length);
+    }
   } else {
     right_value.set_value(right_.value);
   }

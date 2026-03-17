@@ -24,6 +24,7 @@ struct ConDesc
   bool  is_attr;      // 是否属性，false 表示是值
   int   attr_length;  // 如果是属性，表示属性值长度
   int   attr_offset;  // 如果是属性，表示在记录中的偏移量
+  int   field_index = -1;  // field position in table_meta.fields_ (including sys fields)
   Value value;        // 如果是值类型，这里记录值的数据
 };
 
@@ -63,6 +64,7 @@ private:
   ConDesc  right_;
   AttrType attr_type_ = AttrType::UNDEFINED;
   CompOp   comp_op_   = NO_OP;
+  int      null_bitmap_offset_ = -1;
 };
 
 class CompositeConditionFilter : public ConditionFilter
