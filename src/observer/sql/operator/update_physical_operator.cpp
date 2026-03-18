@@ -66,14 +66,26 @@ RC UpdatePhysicalOperator::open(Trx *trx)
     return rc;
   }
 
-  vector<Record> updated_new;  // 已成功更新的新记录，用于失败时回滚
+  // 先构建所有新记录，保证 value/record 生命周期安全，避免边删除边插入时出现中途失败留下不一致
+  vector<Record> new_records;
+  new_records.reserve(old_records.size());
   for (Record &old_record : old_records) {
     Record new_record;
     rc = build_new_record(old_record, new_record);
     if (OB_FAIL(rc)) {
       LOG_WARN("failed to build new record. rc=%s", strrc(rc));
-      goto rollback;
+      return rc;
     }
+    new_records.emplace_back();
+    new_records.back().copy_data(new_record.data(), new_record.len());
+    new_records.back().set_rid(new_record.rid());
+  }
+
+  // 再逐条 delete + insert，期间若失败，回滚到进入本阶段前的状态
+  vector<Record> updated_new;  // 已成功更新的新记录，用于失败时回滚
+  for (size_t i = 0; i < old_records.size(); i++) {
+    Record &old_record = old_records[i];
+    Record &new_record = new_records[i];
     rc = trx_->delete_record(table_, old_record);
     if (OB_FAIL(rc)) {
       LOG_WARN("failed to delete old record. rc=%s", strrc(rc));

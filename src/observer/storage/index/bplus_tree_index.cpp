@@ -158,6 +158,18 @@ RC BplusTreeIndex::close()
 
 RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 {
+  // SQL semantics: if any index key field is NULL, do not insert index entry.
+  // NULL is represented by the record's null bitmap at the end of record data.
+  if (table_ != nullptr) {
+    const TableMeta &meta   = table_->table_meta();
+    const char      *bitmap = record + meta.null_bitmap_offset();
+    for (const FieldMeta &fm : field_metas_) {
+      const int field_idx = meta.field_index_by_offset(fm.offset());
+      if (field_idx >= 0 && (bitmap[field_idx / 8] & (1 << (field_idx % 8))) != 0) {
+        return RC::SUCCESS;
+      }
+    }
+  }
   if (field_metas_.size() == 1) {
     return index_handler_.insert_entry(record + field_metas_[0].offset(), rid);
   }
@@ -176,6 +188,17 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 
 RC BplusTreeIndex::delete_entry(const char *record, const RID *rid)
 {
+  // Symmetric handling with insert: NULL key fields do not have index entries.
+  if (table_ != nullptr) {
+    const TableMeta &meta   = table_->table_meta();
+    const char      *bitmap = record + meta.null_bitmap_offset();
+    for (const FieldMeta &fm : field_metas_) {
+      const int field_idx = meta.field_index_by_offset(fm.offset());
+      if (field_idx >= 0 && (bitmap[field_idx / 8] & (1 << (field_idx % 8))) != 0) {
+        return RC::SUCCESS;
+      }
+    }
+  }
   if (field_metas_.size() == 1) {
     return index_handler_.delete_entry(record + field_metas_[0].offset(), rid);
   }

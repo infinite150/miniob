@@ -239,8 +239,10 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
         LOG_WARN("insert null into non-nullable field. table=%s field=%s", table_meta_.name(), field->name());
         break;
       }
-      const int bit_index = i + normal_field_start_index;
-      bitmap[bit_index / 8] |= (1 << (bit_index % 8));
+      // one bit per field (including sys fields)
+      const int field_index = i + normal_field_start_index;
+      bitmap[field_index / 8] |= (1 << (field_index % 8));
+      // keep data area zeroed; NULL is represented by bitmap only
       continue;
     }
 
