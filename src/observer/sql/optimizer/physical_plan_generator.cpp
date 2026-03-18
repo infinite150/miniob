@@ -120,8 +120,8 @@ RC PhysicalPlanGenerator::create_plan(UpdateLogicalOperator &update_oper, unique
     }
   }
 
-  // prepare subqueries inside update expressions
-  for (unique_ptr<Expression> &expr : update_oper.update_expressions()) {
+  // Build subquery physical operators inside UPDATE SET expressions
+  for (auto &expr : update_oper.value_expressions()) {
     if (!expr) {
       continue;
     }
@@ -130,8 +130,10 @@ RC PhysicalPlanGenerator::create_plan(UpdateLogicalOperator &update_oper, unique
       sq.generate_physical_oper(session);
     });
   }
-  oper = unique_ptr<PhysicalOperator>(
-      new UpdatePhysicalOperator(update_oper.table(), update_oper.field_metas(), std::move(update_oper.update_expressions())));
+
+  oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(update_oper.table(),
+                                                                 update_oper.field_metas(),
+                                                                 std::move(update_oper.value_expressions())));
   if (child_physical_oper) {
     oper->add_child(std::move(child_physical_oper));
   }

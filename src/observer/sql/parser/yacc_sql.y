@@ -171,12 +171,13 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
   char *                                     cstring;
   int                                        number;
   float                                      floats;
-  vector<std::pair<string, Expression *>> *  update_list;
+  vector<std::pair<string, Value>> *         update_list;
+  vector<std::pair<string, Expression *>> *  update_expr_list;
   vector<vector<Value> *> *                   value_list_groups;
 }
 
 %destructor { if ($$) { for (auto *p : *$$) delete p; delete $$; } } <value_list_groups>
-%destructor { if ($$) { for (auto &p : *$$) delete p.second; delete $$; } } <update_list>
+%destructor { if ($$) { for (auto &p : *$$) { delete p.second; } delete $$; } } <update_expr_list>
 %destructor { delete $$; } <condition>
 %destructor { delete $$; } <value>
 %destructor { delete $$; } <rel_attr>
@@ -196,7 +197,6 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
 %token <cstring> ID
 %token <cstring> SSS
 %token NULL_T
-%token TEXT_T
 //非终结符
 
 /** type 定义了各种解析后的结果输出的是什么类型。类型对应了 union 中的定义的成员变量名称 **/
@@ -218,7 +218,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
 %type <cstring>             storage_format
 %type <key_list>            primary_key
 %type <key_list>            attr_list
-%type <update_list>        update_list
+%type <update_expr_list>   update_list
 %type <value_list_groups>  value_list_groups
 %type <inner_join_node>     from_node
 %type <inner_join_list>     from_list
@@ -444,12 +444,7 @@ attr_def:
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
       $$->name = $1;
-      // default length for types without explicit length
-      if ($$->type == AttrType::TEXTS) {
-        $$->length = 4096;  // minimal TEXT support: fixed-length text storage
-      } else {
-        $$->length = 4;
-      }
+      $$->length = 4;
       $$->nullable = ($3 != 0);
     }
     ;
@@ -474,7 +469,6 @@ number:
 type:
     INT_T      { $$ = static_cast<int>(AttrType::INTS); }
     | STRING_T { $$ = static_cast<int>(AttrType::CHARS); }
-    | TEXT_T   { $$ = static_cast<int>(AttrType::TEXTS); }
     | FLOAT_T  { $$ = static_cast<int>(AttrType::FLOATS); }
     | DATE_T   { $$ = static_cast<int>(AttrType::DATES); }
     | VECTOR_T { $$ = static_cast<int>(AttrType::VECTORS); }
@@ -611,7 +605,13 @@ update_stmt:      /*  update 语句的语法解析树*/
       $$ = new ParsedSqlNode(SCF_UPDATE);
       $$->update.relation_name = $2;
       if ($4 != nullptr && !$4->empty()) {
-        $$->update.update_exprs.swap(*$4);
+        // move raw Expression* into unique_ptr
+        $$->update.updates.clear();
+        $$->update.updates.reserve($4->size());
+        for (auto &kv : *$4) {
+          $$->update.updates.emplace_back(kv.first, unique_ptr<Expression>(kv.second));
+          kv.second = nullptr;
+        }
         delete $4;
       }
       if ($5 != nullptr) {

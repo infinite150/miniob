@@ -163,9 +163,8 @@ struct UpdateSqlNode
 {
   string                   relation_name;   ///< Relation to update
   string                   attribute_name;  ///< 更新的字段（兼容单字段）
-  Value                    value;           ///< 更新的值（兼容单字段）
-  // 多列更新：(字段名, 表达式) 列表，非空时优先使用（支持子查询/表达式）
-  vector<pair<string, Expression *>> update_exprs;
+  unique_ptr<Expression>   value_expression;  ///< 更新的表达式（兼容单字段）
+  vector<pair<string, unique_ptr<Expression>>> updates;  ///< 多列更新：(字段名, 表达式) 列表，非空时优先使用
   vector<ConditionSqlNode> conditions;
 };
 

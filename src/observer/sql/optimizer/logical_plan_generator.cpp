@@ -355,7 +355,7 @@ RC LogicalPlanGenerator::create_plan(UpdateStmt *update_stmt, unique_ptr<Logical
   }
 
   unique_ptr<LogicalOperator> update_oper(
-      new UpdateLogicalOperator(table, update_stmt->field_metas(), const_cast<UpdateStmt *>(update_stmt)->take_value_exprs()));
+      new UpdateLogicalOperator(table, update_stmt->field_metas(), std::move(update_stmt->value_expressions_mut())));
 
   if (predicate_oper) {
     predicate_oper->add_child(std::move(table_get_oper));
