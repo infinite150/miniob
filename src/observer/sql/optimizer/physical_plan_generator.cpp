@@ -122,10 +122,10 @@ RC PhysicalPlanGenerator::create_plan(UpdateLogicalOperator &update_oper, unique
 
   // Build subquery physical operators inside UPDATE SET expressions
   Db *db = session ? session->get_current_db() : nullptr;
+  // Pass only correlated(outer) tables when needed; for normal subquery FROM tables,
+  // they should be resolved from Db inside SelectStmt::create. Keeping this map empty
+  // avoids wrong resolution like mapping subquery table name to outer table.
   unordered_map<string, Table *> outer_tables;
-  if (update_oper.table() != nullptr) {
-    outer_tables.emplace(update_oper.table()->name(), update_oper.table());
-  }
   for (auto &expr : update_oper.value_expressions()) {
     if (!expr) {
       continue;
@@ -468,10 +468,8 @@ RC PhysicalPlanGenerator::create_vec_plan(TableGetLogicalOperator &table_get_ope
 {
   vector<unique_ptr<Expression>> &predicates = table_get_oper.predicates();
   Db *db = session ? session->get_current_db() : nullptr;
+  // See note above: do not pre-fill with only outer table.
   unordered_map<string, Table *> outer_tables;
-  if (table_get_oper.table() != nullptr) {
-    outer_tables.emplace(table_get_oper.table()->name(), table_get_oper.table());
-  }
   for (unique_ptr<Expression> &expr : predicates) {
     ExpressionIterator::for_each_subquery(*expr, [session, db, &outer_tables](SubQueryExpr &sq) {
       if (db != nullptr) {
