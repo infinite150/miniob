@@ -21,6 +21,7 @@ See the Mulan PSL v2 for more details. */
 array<unique_ptr<DataType>, static_cast<int>(AttrType::MAXTYPE)> DataType::type_instances_ = {
     make_unique<DataType>(AttrType::UNDEFINED),
     make_unique<CharType>(),
+    make_unique<CharType>(),
     make_unique<IntegerType>(),
     make_unique<FloatType>(),
     make_unique<VectorType>(),

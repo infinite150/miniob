@@ -18,6 +18,7 @@ enum class AttrType
 {
   UNDEFINED,
   CHARS,     ///< 字符串类型
+  TEXTS,     ///< text 类型（按字符串处理，当前按定长存储）
   INTS,      ///< 整数类型(4字节)
   FLOATS,    ///< 浮点数类型(4字节)
   VECTORS,   ///< 向量类型

@@ -16,6 +16,7 @@ See the Mulan PSL v2 for more details. */
 
 class Trx;
 class FieldMeta;
+class Expression;
 
 /**
  * @brief 物理算子：更新（与 Insert/Delete 类似，通过子算子扫描待更新行，逐行 delete + insert 实现）
@@ -24,7 +25,7 @@ class FieldMeta;
 class UpdatePhysicalOperator : public PhysicalOperator
 {
 public:
-  UpdatePhysicalOperator(Table *table, const vector<const FieldMeta *> &field_metas, const vector<Value> &values);
+  UpdatePhysicalOperator(Table *table, const vector<const FieldMeta *> &field_metas, vector<unique_ptr<Expression>> &&update_exprs);
   virtual ~UpdatePhysicalOperator() = default;
 
   PhysicalOperatorType type() const override { return PhysicalOperatorType::UPDATE; }
@@ -46,6 +47,6 @@ private:
 private:
   Table                    *table_       = nullptr;
   vector<const FieldMeta *> field_metas_;
-  vector<Value>             values_;
+  vector<unique_ptr<Expression>> update_exprs_;
   Trx                      *trx_         = nullptr;
 };

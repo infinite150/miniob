@@ -16,14 +16,20 @@ See the Mulan PSL v2 for more details. */
 #include "storage/table/table.h"
 #include "storage/trx/trx.h"
 #include "sql/expr/tuple.h"
+#include "sql/expr/expression_iterator.h"
 
-UpdatePhysicalOperator::UpdatePhysicalOperator(Table *table, const vector<const FieldMeta *> &field_metas, const vector<Value> &values)
-    : table_(table), field_metas_(field_metas), values_(values), trx_(nullptr)
+UpdatePhysicalOperator::UpdatePhysicalOperator(Table *table, const vector<const FieldMeta *> &field_metas, vector<unique_ptr<Expression>> &&update_exprs)
+    : table_(table), field_metas_(field_metas), update_exprs_(std::move(update_exprs)), trx_(nullptr)
 {}
 
 RC UpdatePhysicalOperator::open(Trx *trx)
 {
   trx_ = trx;
+  for (auto &expr : update_exprs_) {
+    if (expr) {
+      ExpressionIterator::for_each_subquery(*expr, [trx](SubQueryExpr &sq) { sq.set_trx(trx); });
+    }
+  }
   if (table_ != nullptr) {
     table_->add_ref();
   }
@@ -159,9 +165,9 @@ RC UpdatePhysicalOperator::build_new_record(const Record &old_record, Record &ne
   const int        sys_fields = table_meta.sys_field_num();
   const int        user_fields = table_meta.field_num() - sys_fields;
 
-  unordered_map<string, const Value *> update_map;
-  for (size_t i = 0; i < field_metas_.size() && i < values_.size(); i++) {
-    update_map[field_metas_[i]->name()] = &values_[i];
+  unordered_map<string, Expression *> update_expr_map;
+  for (size_t i = 0; i < field_metas_.size() && i < update_exprs_.size(); i++) {
+    update_expr_map[field_metas_[i]->name()] = update_exprs_[i].get();
   }
 
   RowTuple tuple;
@@ -176,9 +182,18 @@ RC UpdatePhysicalOperator::build_new_record(const Record &old_record, Record &ne
     if (field == nullptr) {
       return RC::INTERNAL;
     }
-    auto it = update_map.find(field->name());
-    if (it != update_map.end()) {
-      values.emplace_back(*it->second);
+    auto it_expr = update_expr_map.find(field->name());
+    if (it_expr != update_expr_map.end()) {
+      Value v;
+      RC rc = it_expr->second->get_value(tuple, v);
+      if (rc == RC::RECORD_EOF) {
+        v.set_null();  // scalar subquery empty set -> NULL
+        rc = RC::SUCCESS;
+      }
+      if (OB_FAIL(rc)) {
+        return rc;
+      }
+      values.emplace_back(std::move(v));
     } else {
       Value cell;
       RC rc = tuple.cell_at(i + sys_fields, cell);

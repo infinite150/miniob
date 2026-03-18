@@ -171,12 +171,12 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
   char *                                     cstring;
   int                                        number;
   float                                      floats;
-  vector<std::pair<string, Value>> *         update_list;
+  vector<std::pair<string, Expression *>> *  update_list;
   vector<vector<Value> *> *                   value_list_groups;
 }
 
 %destructor { if ($$) { for (auto *p : *$$) delete p; delete $$; } } <value_list_groups>
-%destructor { delete $$; } <update_list>
+%destructor { if ($$) { for (auto &p : *$$) delete p.second; delete $$; } } <update_list>
 %destructor { delete $$; } <condition>
 %destructor { delete $$; } <value>
 %destructor { delete $$; } <rel_attr>
@@ -196,6 +196,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
 %token <cstring> ID
 %token <cstring> SSS
 %token NULL_T
+%token TEXT_T
 //非终结符
 
 /** type 定义了各种解析后的结果输出的是什么类型。类型对应了 union 中的定义的成员变量名称 **/
@@ -443,7 +444,12 @@ attr_def:
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
       $$->name = $1;
-      $$->length = 4;
+      // default length for types without explicit length
+      if ($$->type == AttrType::TEXTS) {
+        $$->length = 4096;  // minimal TEXT support: fixed-length text storage
+      } else {
+        $$->length = 4;
+      }
       $$->nullable = ($3 != 0);
     }
     ;
@@ -468,6 +474,7 @@ number:
 type:
     INT_T      { $$ = static_cast<int>(AttrType::INTS); }
     | STRING_T { $$ = static_cast<int>(AttrType::CHARS); }
+    | TEXT_T   { $$ = static_cast<int>(AttrType::TEXTS); }
     | FLOAT_T  { $$ = static_cast<int>(AttrType::FLOATS); }
     | DATE_T   { $$ = static_cast<int>(AttrType::DATES); }
     | VECTOR_T { $$ = static_cast<int>(AttrType::VECTORS); }
@@ -604,7 +611,7 @@ update_stmt:      /*  update 语句的语法解析树*/
       $$ = new ParsedSqlNode(SCF_UPDATE);
       $$->update.relation_name = $2;
       if ($4 != nullptr && !$4->empty()) {
-        $$->update.updates.swap(*$4);
+        $$->update.update_exprs.swap(*$4);
         delete $4;
       }
       if ($5 != nullptr) {
@@ -615,17 +622,15 @@ update_stmt:      /*  update 语句的语法解析树*/
     ;
 
 update_list:
-    ID EQ value
+    ID EQ expression
     {
-      $$ = new vector<std::pair<string, Value>>();
-      $$->emplace_back($1, std::move(*$3));
-      delete $3;
+      $$ = new vector<std::pair<string, Expression *>>();
+      $$->emplace_back($1, $3);
     }
-    | update_list COMMA ID EQ value
+    | update_list COMMA ID EQ expression
     {
       $$ = $1;
-      $$->emplace_back($3, std::move(*$5));
-      delete $5;
+      $$->emplace_back($3, $5);
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/

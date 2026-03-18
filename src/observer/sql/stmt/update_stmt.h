@@ -21,6 +21,7 @@ See the Mulan PSL v2 for more details. */
 class Table;
 class FilterStmt;
 class FieldMeta;
+class Expression;
 
 /**
  * @brief 更新语句
@@ -30,7 +31,7 @@ class UpdateStmt : public Stmt
 {
 public:
   UpdateStmt() = default;
-  UpdateStmt(Table *table, vector<const FieldMeta *> field_metas, vector<Value> values, FilterStmt *filter_stmt);
+  UpdateStmt(Table *table, vector<const FieldMeta *> field_metas, vector<unique_ptr<Expression>> value_exprs, FilterStmt *filter_stmt);
   ~UpdateStmt() override;
 
   StmtType type() const override { return StmtType::UPDATE; }
@@ -41,15 +42,14 @@ public:
 public:
   Table *table() const { return table_; }
   const vector<const FieldMeta *> &field_metas() const { return field_metas_; }
-  const vector<Value>            &values() const { return values_; }
+  const vector<unique_ptr<Expression>> &value_exprs() const { return value_exprs_; }
+  vector<unique_ptr<Expression>> &&take_value_exprs() { return std::move(value_exprs_); }
   const FieldMeta *field_meta() const { return field_metas_.empty() ? nullptr : field_metas_[0]; }
-  const Value     &value() const { return values_.empty() ? value_empty_ : values_[0]; }
   FilterStmt      *filter_stmt() const { return filter_stmt_; }
 
 private:
   Table                    *table_        = nullptr;
   vector<const FieldMeta *> field_metas_;
-  vector<Value>             values_;
-  Value                     value_empty_;  ///< 空占位，field_metas_ 为空时 value() 返回引用
+  vector<unique_ptr<Expression>> value_exprs_;
   FilterStmt               *filter_stmt_ = nullptr;
 };

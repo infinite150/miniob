@@ -16,12 +16,13 @@ See the Mulan PSL v2 for more details. */
 #include "common/log/log.h"
 #include "common/lang/string.h"
 #include "common/value.h"
+#include "sql/expr/expression.h"
 #include "sql/stmt/filter_stmt.h"
 #include "storage/db/db.h"
 #include "storage/table/table.h"
 
-UpdateStmt::UpdateStmt(Table *table, vector<const FieldMeta *> field_metas, vector<Value> values, FilterStmt *filter_stmt)
-    : table_(table), field_metas_(std::move(field_metas)), values_(std::move(values)), filter_stmt_(filter_stmt)
+UpdateStmt::UpdateStmt(Table *table, vector<const FieldMeta *> field_metas, vector<unique_ptr<Expression>> value_exprs, FilterStmt *filter_stmt)
+    : table_(table), field_metas_(std::move(field_metas)), value_exprs_(std::move(value_exprs)), filter_stmt_(filter_stmt)
 {}
 
 UpdateStmt::~UpdateStmt()
@@ -43,10 +44,10 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update, Stmt *&stmt)
   }
 
   vector<const FieldMeta *> field_metas;
-  vector<Value>             values_to_set;
+  vector<unique_ptr<Expression>> value_exprs_to_set;
 
-  if (!update.updates.empty()) {
-    for (const auto &p : update.updates) {
+  if (!update.update_exprs.empty()) {
+    for (const auto &p : update.update_exprs) {
       const char *field_name = p.first.c_str();
       if (common::is_blank(field_name)) {
         LOG_WARN("invalid blank field name");
@@ -67,82 +68,39 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update, Stmt *&stmt)
         LOG_WARN("cannot update invisible(system) field. table=%s, field=%s", table_name, field_name);
         return RC::INVALID_ARGUMENT;
       }
-      Value value_to_set = p.second;
-      if (value_to_set.is_null()) {
-        if (!field_meta->nullable()) {
-          LOG_WARN("update null into non-nullable field. table=%s, field=%s", table_name, field_name);
-          return RC::INVALID_ARGUMENT;
+
+      unique_ptr<Expression> expr(p.second);  // take ownership
+      // For constant VALUE expr, we can validate/cast early (still enforced again at execution time).
+      if (expr && expr->type() == ExprType::VALUE) {
+        const Value &v = static_cast<ValueExpr *>(expr.get())->get_value();
+        if (v.is_null()) {
+          if (!field_meta->nullable()) {
+            LOG_WARN("update null into non-nullable field. table=%s, field=%s", table_name, field_name);
+            return RC::INVALID_ARGUMENT;
+          }
+        } else {
+          if ((field_meta->type() == AttrType::CHARS || field_meta->type() == AttrType::TEXTS) &&
+              v.attr_type() == AttrType::CHARS && v.length() > field_meta->len()) {
+            LOG_WARN("update string too long for field. table=%s, field=%s, len=%d, max=%d",
+                     table_name, field_name, v.length(), field_meta->len());
+            return RC::INVALID_ARGUMENT;
+          }
+          if (field_meta->type() != v.attr_type()) {
+            Value casted;
+            rc = Value::cast_to(v, field_meta->type(), casted);
+            if (OB_FAIL(rc)) {
+              LOG_WARN("field type mismatch. table=%s, field=%s", table_name, field_name);
+              return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+            }
+            expr = make_unique<ValueExpr>(casted);
+          }
         }
-        field_metas.push_back(field_meta);
-        values_to_set.push_back(std::move(value_to_set));
-        continue;
-      }
-      if (field_meta->type() == AttrType::CHARS && value_to_set.attr_type() == AttrType::CHARS &&
-          value_to_set.length() > field_meta->len()) {
-        LOG_WARN("update string too long for field. table=%s, field=%s, len=%d, max=%d",
-                 table_name, field_name, value_to_set.length(), field_meta->len());
-        return RC::INVALID_ARGUMENT;
-      }
-      if (field_meta->type() != value_to_set.attr_type()) {
-        Value casted;
-        rc = Value::cast_to(value_to_set, field_meta->type(), casted);
-        if (OB_FAIL(rc)) {
-          LOG_WARN("field type mismatch. table=%s, field=%s", table_name, field_name);
-          return RC::SCHEMA_FIELD_TYPE_MISMATCH;
-        }
-        value_to_set = std::move(casted);
       }
       field_metas.push_back(field_meta);
-      values_to_set.push_back(std::move(value_to_set));
+      value_exprs_to_set.push_back(std::move(expr));
     }
   } else {
-    const char *field_name = update.attribute_name.c_str();
-    if (common::is_blank(field_name)) {
-      LOG_WARN("invalid argument. field_name is blank");
-      return RC::INVALID_ARGUMENT;
-    }
-    Table *table = db->find_table(table_name);
-    if (table == nullptr) {
-      LOG_WARN("no such table. db=%s, table_name=%s", db->name(), table_name);
-      return RC::SCHEMA_TABLE_NOT_EXIST;
-    }
-    const TableMeta &table_meta = table->table_meta();
-    const FieldMeta *field_meta = table_meta.field(field_name);
-    if (field_meta == nullptr) {
-      LOG_WARN("no such field. table=%s, field=%s", table_name, field_name);
-      return RC::SCHEMA_FIELD_NOT_EXIST;
-    }
-    if (!field_meta->visible()) {
-      LOG_WARN("cannot update invisible(system) field. table=%s, field=%s", table_name, field_name);
-      return RC::INVALID_ARGUMENT;
-    }
-    Value value_to_set = update.value;
-    if (value_to_set.is_null()) {
-      if (!field_meta->nullable()) {
-        LOG_WARN("update null into non-nullable field. table=%s, field=%s", table_name, field_name);
-        return RC::INVALID_ARGUMENT;
-      }
-      field_metas.push_back(field_meta);
-      values_to_set.push_back(std::move(value_to_set));
-    } else {
-    if (field_meta->type() == AttrType::CHARS && value_to_set.attr_type() == AttrType::CHARS &&
-        value_to_set.length() > field_meta->len()) {
-      LOG_WARN("update string too long for field. table=%s, field=%s, len=%d, max=%d",
-               table_name, field_name, value_to_set.length(), field_meta->len());
-      return RC::INVALID_ARGUMENT;
-    }
-    if (field_meta->type() != value_to_set.attr_type()) {
-      Value casted;
-      rc = Value::cast_to(value_to_set, field_meta->type(), casted);
-      if (OB_FAIL(rc)) {
-        LOG_WARN("field type mismatch. table=%s, field=%s", table_name, field_name);
-        return RC::SCHEMA_FIELD_TYPE_MISMATCH;
-      }
-      value_to_set = std::move(casted);
-    }
-    field_metas.push_back(field_meta);
-    values_to_set.push_back(std::move(value_to_set));
-    }
+    // legacy single-column update path not used when using expression-based parser
   }
 
   Table *table = db->find_table(table_name);
@@ -161,6 +119,6 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update, Stmt *&stmt)
     return rc;
   }
 
-  stmt = new UpdateStmt(table, std::move(field_metas), std::move(values_to_set), filter_stmt);
+  stmt = new UpdateStmt(table, std::move(field_metas), std::move(value_exprs_to_set), filter_stmt);
   return RC::SUCCESS;
 }
