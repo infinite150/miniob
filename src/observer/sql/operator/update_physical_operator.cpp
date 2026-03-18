@@ -189,5 +189,19 @@ RC UpdatePhysicalOperator::build_new_record(const Record &old_record, Record &ne
     }
   }
 
+  // Enforce NOT NULL at execution time.
+  // This protects against UPDATE values that become NULL after evaluation (e.g., scalar subquery returns NULL),
+  // and prevents any path from bypassing NOT NULL constraints.
+  for (int i = 0; i < user_fields; i++) {
+    const FieldMeta *field = table_meta.field(i + sys_fields);
+    if (field == nullptr) {
+      return RC::INTERNAL;
+    }
+    if (!field->nullable() && values[i].is_null()) {
+      LOG_WARN("update null into non-nullable field. table=%s, field=%s", table_meta.name(), field->name());
+      return RC::INVALID_ARGUMENT;
+    }
+  }
+
   return table_->make_record(static_cast<int>(values.size()), values.data(), new_record);
 }
