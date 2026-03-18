@@ -121,11 +121,19 @@ RC PhysicalPlanGenerator::create_plan(UpdateLogicalOperator &update_oper, unique
   }
 
   // Build subquery physical operators inside UPDATE SET expressions
+  Db *db = session ? session->get_current_db() : nullptr;
+  unordered_map<string, Table *> outer_tables;
+  if (update_oper.table() != nullptr) {
+    outer_tables.emplace(update_oper.table()->name(), update_oper.table());
+  }
   for (auto &expr : update_oper.value_expressions()) {
     if (!expr) {
       continue;
     }
-    ExpressionIterator::for_each_subquery(*expr, [session](SubQueryExpr &sq) {
+    ExpressionIterator::for_each_subquery(*expr, [session, db, &outer_tables](SubQueryExpr &sq) {
+      if (db != nullptr) {
+        sq.generate_select_stmt(db, outer_tables);
+      }
       sq.generate_logical_oper();
       sq.generate_physical_oper(session);
     });
@@ -459,8 +467,16 @@ RC PhysicalPlanGenerator::create_plan(GroupByLogicalOperator &logical_oper, uniq
 RC PhysicalPlanGenerator::create_vec_plan(TableGetLogicalOperator &table_get_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
   vector<unique_ptr<Expression>> &predicates = table_get_oper.predicates();
+  Db *db = session ? session->get_current_db() : nullptr;
+  unordered_map<string, Table *> outer_tables;
+  if (table_get_oper.table() != nullptr) {
+    outer_tables.emplace(table_get_oper.table()->name(), table_get_oper.table());
+  }
   for (unique_ptr<Expression> &expr : predicates) {
-    ExpressionIterator::for_each_subquery(*expr, [session](SubQueryExpr &sq) {
+    ExpressionIterator::for_each_subquery(*expr, [session, db, &outer_tables](SubQueryExpr &sq) {
+      if (db != nullptr) {
+        sq.generate_select_stmt(db, outer_tables);
+      }
       sq.generate_logical_oper();
       sq.generate_physical_oper(session);
     });
