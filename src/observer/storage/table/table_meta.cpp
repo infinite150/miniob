@@ -71,8 +71,7 @@ RC TableMeta::init(int32_t table_id, const char *name, const vector<FieldMeta> *
     fields_.resize(attributes.size() + trx_fields->size());
     for (size_t i = 0; i < trx_fields->size(); i++) {
       const FieldMeta &field_meta = (*trx_fields)[i];
-      fields_[i] = FieldMeta(field_meta.name(), field_meta.type(), field_offset, field_meta.len(),
-                             false /*visible*/, field_meta.field_id(), false /*nullable*/);
+      fields_[i] = FieldMeta(field_meta.name(), field_meta.type(), field_offset, field_meta.len(), false /*visible*/, field_meta.field_id(), false /*nullable*/);
       field_offset += field_meta.len();
     }
 
@@ -95,9 +94,7 @@ RC TableMeta::init(int32_t table_id, const char *name, const vector<FieldMeta> *
   }
 
   primary_keys_ = primary_keys;
-  // record layout: [sys_fields][user_fields][null_bitmap]
-  // bitmap uses 1 bit per field (including sys_fields)
-  record_size_ = field_offset + null_bitmap_bytes();
+  record_size_ = field_offset + null_bitmap_size();
 
   table_id_ = table_id;
   name_     = name;
@@ -175,6 +172,27 @@ const IndexMeta *TableMeta::index(int i) const { return &indexes_[i]; }
 int TableMeta::index_num() const { return indexes_.size(); }
 
 int TableMeta::record_size() const { return record_size_; }
+
+int TableMeta::null_bitmap_size() const
+{
+  // one bit per field (including sys fields) stored at the end of record
+  return (field_num() + 7) / 8;
+}
+
+int TableMeta::null_bitmap_offset() const
+{
+  return record_size_ - null_bitmap_size();
+}
+
+int TableMeta::field_index_by_offset(int offset) const
+{
+  for (int i = 0; i < static_cast<int>(fields_.size()); i++) {
+    if (fields_[i].offset() == offset) {
+      return i;
+    }
+  }
+  return -1;
+}
 
 int TableMeta::serialize(ostream &ss) const
 {
@@ -291,12 +309,8 @@ int TableMeta::deserialize(istream &is)
   storage_engine_ = static_cast<StorageEngine>(storage_engine);
   name_.swap(table_name);
   fields_.swap(fields);
-  // backward compatibility:
-  // - old meta might not have nullable info and also has no bitmap on disk.
-  // - for new tables, record always ends with null bitmap.
-  // Here we assume new meta by default and append bitmap length based on field count.
   record_size_ = fields_.back().offset() + fields_.back().len() - fields_.begin()->offset();
-  record_size_ += null_bitmap_bytes();
+  record_size_ += null_bitmap_size();
 
   for (const FieldMeta &field_meta : fields_) {
     if (!field_meta.visible()) {

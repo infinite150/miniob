@@ -233,21 +233,11 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
                                     ? static_cast<Expression *>(new FieldExpr(filter_obj_left.field))
                                     : static_cast<Expression *>(new ValueExpr(filter_obj_left.value)));
 
-    // IS NULL / IS NOT NULL: build dedicated expression without implicit casts
-    if (filter_unit->comp() == IS_NULL_OP || filter_unit->comp() == IS_NOT_NULL_OP) {
-      const bool is_not = (filter_unit->comp() == IS_NOT_NULL_OP);
-      cmp_exprs.emplace_back(new IsNullExpr(std::move(left), is_not));
-      continue;
-    }
-
     unique_ptr<Expression> right(filter_obj_right.is_attr
                                      ? static_cast<Expression *>(new FieldExpr(filter_obj_right.field))
                                      : static_cast<Expression *>(new ValueExpr(filter_obj_right.value)));
 
-    // NULL semantics: NULL can be compared with any type, result is always false.
-    // Do not try to insert implicit casts for NULL, otherwise cast_cost(UNDEFINED, T) may be unsupported and fail the query.
-    if (left->value_type() != AttrType::UNDEFINED && right->value_type() != AttrType::UNDEFINED &&
-        left->value_type() != right->value_type()) {
+    if (left->value_type() != right->value_type()) {
       auto left_to_right_cost = implicit_cast_cost(left->value_type(), right->value_type());
       auto right_to_left_cost = implicit_cast_cost(right->value_type(), left->value_type());
       if (left_to_right_cost <= right_to_left_cost && left_to_right_cost != INT32_MAX) {

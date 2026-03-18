@@ -86,16 +86,9 @@ public:
   static RC cast_to(const Value &value, AttrType to_type, Value &result)
   {
     if (value.attr_type() == AttrType::UNDEFINED) {
-      switch (to_type) {
-        case AttrType::FLOATS:
-          result.set_float(0.0f);
-          return RC::SUCCESS;
-        case AttrType::INTS:
-          result.set_int(0);
-          return RC::SUCCESS;
-        default:
-          return RC::UNSUPPORTED;
-      }
+      // SQL semantics: CAST(NULL AS T) -> NULL
+      result.reset();
+      return RC::SUCCESS;
     }
     return DataType::type_instance(value.attr_type())->cast_to(value, to_type, result);
   }

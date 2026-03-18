@@ -39,11 +39,6 @@ RC ExpressionIterator::iterate_child_expr(Expression &expr, function<RC(unique_p
 
     } break;
 
-    case ExprType::IS_NULL: {
-      auto &is_null_expr = static_cast<IsNullExpr &>(expr);
-      rc = callback(is_null_expr.child());
-    } break;
-
     case ExprType::CONJUNCTION: {
       auto &conjunction_expr = static_cast<ConjunctionExpr &>(expr);
       for (auto &child : conjunction_expr.children()) {

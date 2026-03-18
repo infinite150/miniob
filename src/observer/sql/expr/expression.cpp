@@ -19,7 +19,6 @@ See the Mulan PSL v2 for more details. */
 #include "storage/common/column.h"
 #include "common/type/data_type.h"
 #include <cmath>
-#include <cfenv>
 #include <functional>
 #include <regex>
 #include <string>
@@ -45,37 +44,6 @@ RC StarExpr::get_column(Chunk &chunk, Column &column)
 RC FieldExpr::get_value(const Tuple &tuple, Value &value) const
 {
   return tuple.find_cell(TupleCellSpec(table_name(), field_name()), value);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-RC IsNullExpr::get_value(const Tuple &tuple, Value &value) const
-{
-  Value child_value;
-  RC rc = child_->get_value(tuple, child_value);
-  if (rc != RC::SUCCESS) {
-    return rc;
-  }
-  bool result = value_is_null(child_value);
-  if (is_not_) {
-    result = !result;
-  }
-  value.set_boolean(result);
-  return RC::SUCCESS;
-}
-
-RC IsNullExpr::try_get_value(Value &value) const
-{
-  Value child_value;
-  RC rc = child_->try_get_value(child_value);
-  if (rc != RC::SUCCESS) {
-    return rc;
-  }
-  bool result = value_is_null(child_value);
-  if (is_not_) {
-    result = !result;
-  }
-  value.set_boolean(result);
-  return RC::SUCCESS;
 }
 
 bool FieldExpr::equal(const Expression &other) const
@@ -300,6 +268,17 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
 
 RC ComparisonExpr::try_get_value(Value &cell) const
 {
+  if (comp_ == IS_NULL_OP || comp_ == IS_NOT_NULL_OP) {
+    if (left_->type() == ExprType::VALUE) {
+      ValueExpr *left_value_expr = static_cast<ValueExpr *>(left_.get());
+      const Value &left_cell     = left_value_expr->get_value();
+      const bool is_null         = value_is_null(left_cell);
+      cell.set_boolean(comp_ == IS_NULL_OP ? is_null : !is_null);
+      return RC::SUCCESS;
+    }
+    return RC::INVALID_ARGUMENT;
+  }
+
   if (left_->type() == ExprType::VALUE && right_->type() == ExprType::VALUE) {
     ValueExpr *  left_value_expr  = static_cast<ValueExpr *>(left_.get());
     ValueExpr *  right_value_expr = static_cast<ValueExpr *>(right_.get());
@@ -322,6 +301,17 @@ RC ComparisonExpr::try_get_value(Value &cell) const
 RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
 {
   RC rc = RC::SUCCESS;
+
+  if (comp_ == IS_NULL_OP || comp_ == IS_NOT_NULL_OP) {
+    Value left_value;
+    rc = left_->get_value(tuple, left_value);
+    if (rc != RC::SUCCESS) {
+      return rc;
+    }
+    const bool is_null = value_is_null(left_value);
+    value.set_boolean(comp_ == IS_NULL_OP ? is_null : !is_null);
+    return RC::SUCCESS;
+  }
 
   if (comp_ == EXISTS_OP || comp_ == NOT_EXISTS_OP) {
     SubQueryExpr *subquery = (right_->type() == ExprType::SUBQUERY) ? static_cast<SubQueryExpr *>(right_.get()) : nullptr;
@@ -467,6 +457,22 @@ RC ComparisonExpr::eval(Chunk &chunk, vector<uint8_t> &select)
   RC     rc = RC::SUCCESS;
   Column left_column;
   Column right_column;
+
+  if (comp_ == IS_NULL_OP || comp_ == IS_NOT_NULL_OP) {
+    rc = left_->get_column(chunk, left_column);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
+      return rc;
+    }
+    const int rows = left_column.count();
+    for (int i = 0; i < rows; ++i) {
+      Value v = left_column.get_value(i);
+      bool  is_null = value_is_null(v);
+      bool  res = (comp_ == IS_NULL_OP) ? is_null : !is_null;
+      select[i] &= res ? 1 : 0;
+    }
+    return RC::SUCCESS;
+  }
 
   rc = left_->get_column(chunk, left_column);
   if (rc != RC::SUCCESS) {
@@ -628,22 +634,42 @@ RC ArithmeticExpr::calc_value(const Value &left_value, const Value &right_value,
 
   switch (arithmetic_type_) {
     case Type::ADD: {
+      if (left_value.is_null() || right_value.is_null()) {
+        value.reset();
+        return RC::SUCCESS;
+      }
       Value::add(left_value, right_value, value);
     } break;
 
     case Type::SUB: {
+      if (left_value.is_null() || right_value.is_null()) {
+        value.reset();
+        return RC::SUCCESS;
+      }
       Value::subtract(left_value, right_value, value);
     } break;
 
     case Type::MUL: {
+      if (left_value.is_null() || right_value.is_null()) {
+        value.reset();
+        return RC::SUCCESS;
+      }
       Value::multiply(left_value, right_value, value);
     } break;
 
     case Type::DIV: {
+      if (left_value.is_null() || right_value.is_null()) {
+        value.reset();
+        return RC::SUCCESS;
+      }
       Value::divide(left_value, right_value, value);
     } break;
 
     case Type::NEGATIVE: {
+      if (left_value.is_null()) {
+        value.reset();
+        return RC::SUCCESS;
+      }
       Value::negative(left_value, value);
     } break;
 
@@ -735,10 +761,12 @@ RC ArithmeticExpr::get_value(const Tuple &tuple, Value &value) const
     LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
     return rc;
   }
-  rc = right_->get_value(tuple, right_value);
-  if (rc != RC::SUCCESS) {
-    LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
-    return rc;
+  if (right_) {
+    rc = right_->get_value(tuple, right_value);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
+      return rc;
+    }
   }
   return calc_value(left_value, right_value, value);
 }
@@ -982,26 +1010,17 @@ RC FunctionExpr::eval_length(const Value &arg, Value &result) const
 
 RC FunctionExpr::eval_round(const Value &arg, Value &result) const
 {
-  if (arg.is_null()) {
-    result.set_null();
-    return RC::SUCCESS;
-  }
   if (arg.attr_type() != AttrType::FLOATS) {
     return RC::INVALID_ARGUMENT;
   }
   float val = arg.get_float();
-  // Banker's rounding (ties to even), to match expected results
-  int rounded = static_cast<int>(nearbyintf(val));
+  int rounded = static_cast<int>(roundf(val));
   result.set_int(rounded);
   return RC::SUCCESS;
 }
 
 RC FunctionExpr::eval_round(const Value &arg, const Value &precision_arg, Value &result) const
 {
-  if (arg.is_null()) {
-    result.set_null();
-    return RC::SUCCESS;
-  }
   if (arg.attr_type() != AttrType::FLOATS) {
     return RC::INVALID_ARGUMENT;
   }
@@ -1018,8 +1037,7 @@ RC FunctionExpr::eval_round(const Value &arg, const Value &precision_arg, Value 
   }
   float val = arg.get_float();
   float factor = powf(10.0f, static_cast<float>(prec));
-  // Banker's rounding (ties to even)
-  float rounded = nearbyintf(val * factor) / factor;
+  float rounded = roundf(val * factor) / factor;
   result.set_float(rounded);
   return RC::SUCCESS;
 }
@@ -1027,12 +1045,13 @@ RC FunctionExpr::eval_round(const Value &arg, const Value &precision_arg, Value 
 RC FunctionExpr::eval_date_format(const Value &date_val, const Value &format_val, Value &result) const
 {
   Value actual_date;
-  if (date_val.is_null()) {
-    result.set_null();
-    return RC::SUCCESS;
-  }
   if (date_val.attr_type() == AttrType::DATES) {
     actual_date = date_val;
+  } else if (date_val.attr_type() == AttrType::CHARS) {
+    RC rc = DataType::type_instance(AttrType::DATES)->set_value_from_str(actual_date, date_val.get_string());
+    if (rc != RC::SUCCESS) {
+      return RC::INVALID_ARGUMENT;
+    }
   } else {
     return RC::INVALID_ARGUMENT;
   }
@@ -1107,12 +1126,20 @@ RC FunctionExpr::get_value(const Tuple &tuple, Value &value) const
     if (rc != RC::SUCCESS) {
       return rc;
     }
+    if (arg.is_null()) {
+      value.reset();
+      return RC::SUCCESS;
+    }
     return eval_length(arg, value);
   } else if (func_type_ == Type::ROUND) {
     if (children_.size() == 1) {
       Value arg;
       RC rc = children_[0]->get_value(tuple, arg);
       if (rc != RC::SUCCESS) return rc;
+      if (arg.is_null()) {
+        value.reset();
+        return RC::SUCCESS;
+      }
       return eval_round(arg, value);
     } else if (children_.size() == 2) {
       Value arg, prec;
@@ -1120,6 +1147,10 @@ RC FunctionExpr::get_value(const Tuple &tuple, Value &value) const
       if (rc != RC::SUCCESS) return rc;
       rc = children_[1]->get_value(tuple, prec);
       if (rc != RC::SUCCESS) return rc;
+      if (arg.is_null() || prec.is_null()) {
+        value.reset();
+        return RC::SUCCESS;
+      }
       return eval_round(arg, prec, value);
     } else {
       return RC::INVALID_ARGUMENT;
@@ -1133,6 +1164,10 @@ RC FunctionExpr::get_value(const Tuple &tuple, Value &value) const
     if (rc != RC::SUCCESS) return rc;
     rc = children_[1]->get_value(tuple, format_val);
     if (rc != RC::SUCCESS) return rc;
+    if (date_val.is_null() || format_val.is_null()) {
+      value.reset();
+      return RC::SUCCESS;
+    }
     return eval_date_format(date_val, format_val, value);
   }
   return RC::INVALID_ARGUMENT;
@@ -1147,12 +1182,20 @@ RC FunctionExpr::try_get_value(Value &value) const
     Value arg;
     RC rc = children_[0]->try_get_value(arg);
     if (rc != RC::SUCCESS) return rc;
+    if (arg.is_null()) {
+      value.reset();
+      return RC::SUCCESS;
+    }
     return eval_length(arg, value);
   } else if (func_type_ == Type::ROUND) {
     if (children_.size() == 1) {
       Value arg;
       RC rc = children_[0]->try_get_value(arg);
       if (rc != RC::SUCCESS) return rc;
+      if (arg.is_null()) {
+        value.reset();
+        return RC::SUCCESS;
+      }
       return eval_round(arg, value);
     } else if (children_.size() == 2) {
       Value arg, prec;
@@ -1160,6 +1203,10 @@ RC FunctionExpr::try_get_value(Value &value) const
       if (rc != RC::SUCCESS) return rc;
       rc = children_[1]->try_get_value(prec);
       if (rc != RC::SUCCESS) return rc;
+      if (arg.is_null() || prec.is_null()) {
+        value.reset();
+        return RC::SUCCESS;
+      }
       return eval_round(arg, prec, value);
     } else {
       return RC::INVALID_ARGUMENT;
@@ -1173,6 +1220,10 @@ RC FunctionExpr::try_get_value(Value &value) const
     if (rc != RC::SUCCESS) return rc;
     rc = children_[1]->try_get_value(format_val);
     if (rc != RC::SUCCESS) return rc;
+    if (date_val.is_null() || format_val.is_null()) {
+      value.reset();
+      return RC::SUCCESS;
+    }
     return eval_date_format(date_val, format_val, value);
   }
   return RC::INVALID_ARGUMENT;

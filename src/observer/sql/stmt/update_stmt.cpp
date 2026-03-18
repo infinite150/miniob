@@ -68,15 +68,20 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update, Stmt *&stmt)
         return RC::INVALID_ARGUMENT;
       }
       Value value_to_set = p.second;
-      // NULL assignment: only allowed when column is nullable, and no cast is needed
       if (value_to_set.is_null()) {
         if (!field_meta->nullable()) {
-          LOG_WARN("field does not allow NULL. table=%s, field=%s", table_name, field_name);
+          LOG_WARN("update null into non-nullable field. table=%s, field=%s", table_name, field_name);
           return RC::INVALID_ARGUMENT;
         }
         field_metas.push_back(field_meta);
         values_to_set.push_back(std::move(value_to_set));
         continue;
+      }
+      if (field_meta->type() == AttrType::CHARS && value_to_set.attr_type() == AttrType::CHARS &&
+          value_to_set.length() > field_meta->len()) {
+        LOG_WARN("update string too long for field. table=%s, field=%s, len=%d, max=%d",
+                 table_name, field_name, value_to_set.length(), field_meta->len());
+        return RC::INVALID_ARGUMENT;
       }
       if (field_meta->type() != value_to_set.attr_type()) {
         Value casted;
@@ -112,27 +117,31 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update, Stmt *&stmt)
       return RC::INVALID_ARGUMENT;
     }
     Value value_to_set = update.value;
-    // NULL assignment: only allowed when column is nullable, and no cast is needed
     if (value_to_set.is_null()) {
       if (!field_meta->nullable()) {
-        LOG_WARN("field does not allow NULL. table=%s, field=%s", table_name, field_name);
+        LOG_WARN("update null into non-nullable field. table=%s, field=%s", table_name, field_name);
         return RC::INVALID_ARGUMENT;
       }
       field_metas.push_back(field_meta);
       values_to_set.push_back(std::move(value_to_set));
-      // filter_stmt will be handled below
     } else {
-      if (field_meta->type() != value_to_set.attr_type()) {
-        Value casted;
-        rc = Value::cast_to(value_to_set, field_meta->type(), casted);
-        if (OB_FAIL(rc)) {
-          LOG_WARN("field type mismatch. table=%s, field=%s", table_name, field_name);
-          return RC::SCHEMA_FIELD_TYPE_MISMATCH;
-        }
-        value_to_set = std::move(casted);
+    if (field_meta->type() == AttrType::CHARS && value_to_set.attr_type() == AttrType::CHARS &&
+        value_to_set.length() > field_meta->len()) {
+      LOG_WARN("update string too long for field. table=%s, field=%s, len=%d, max=%d",
+               table_name, field_name, value_to_set.length(), field_meta->len());
+      return RC::INVALID_ARGUMENT;
+    }
+    if (field_meta->type() != value_to_set.attr_type()) {
+      Value casted;
+      rc = Value::cast_to(value_to_set, field_meta->type(), casted);
+      if (OB_FAIL(rc)) {
+        LOG_WARN("field type mismatch. table=%s, field=%s", table_name, field_name);
+        return RC::SCHEMA_FIELD_TYPE_MISMATCH;
       }
-      field_metas.push_back(field_meta);
-      values_to_set.push_back(std::move(value_to_set));
+      value_to_set = std::move(casted);
+    }
+    field_metas.push_back(field_meta);
+    values_to_set.push_back(std::move(value_to_set));
     }
   }
 

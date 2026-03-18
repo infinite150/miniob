@@ -98,27 +98,6 @@ RC ExpressionBinder::bind_expression(unique_ptr<Expression> &expr, vector<unique
       return bind_comparison_expression(expr, bound_expressions);
     } break;
 
-    case ExprType::IS_NULL: {
-      // bind child expression first
-      auto is_null_expr = static_cast<IsNullExpr *>(expr.get());
-      vector<unique_ptr<Expression>> child_bound_expressions;
-      unique_ptr<Expression>        &child_expr = is_null_expr->child();
-      RC rc = bind_expression(child_expr, child_bound_expressions);
-      if (OB_FAIL(rc)) {
-        return rc;
-      }
-      if (child_bound_expressions.size() != 1) {
-        LOG_WARN("invalid children number of is null expression: %d", child_bound_expressions.size());
-        return RC::INVALID_ARGUMENT;
-      }
-      unique_ptr<Expression> &child = child_bound_expressions[0];
-      if (child.get() != child_expr.get()) {
-        child_expr.reset(child.release());
-      }
-      bound_expressions.emplace_back(std::move(expr));
-      return RC::SUCCESS;
-    } break;
-
     case ExprType::CONJUNCTION: {
       return bind_conjunction_expression(expr, bound_expressions);
     } break;

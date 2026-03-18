@@ -27,7 +27,9 @@ const static Json::StaticString FIELD_VISIBLE("visible");
 const static Json::StaticString FIELD_FIELD_ID("FIELD_id");
 const static Json::StaticString FIELD_NULLABLE("nullable");
 
-FieldMeta::FieldMeta() : attr_type_(AttrType::UNDEFINED), attr_offset_(-1), attr_len_(0), visible_(false), field_id_(0) {}
+FieldMeta::FieldMeta()
+    : attr_type_(AttrType::UNDEFINED), attr_offset_(-1), attr_len_(0), visible_(false), field_id_(0), nullable_(false)
+{}
 
 FieldMeta::FieldMeta(const char *name, AttrType attr_type, int attr_offset, int attr_len, bool visible, int field_id, bool nullable)
 {
@@ -54,7 +56,7 @@ RC FieldMeta::init(const char *name, AttrType attr_type, int attr_offset, int at
   attr_offset_ = attr_offset;
   visible_     = visible;
   field_id_ = field_id;
-  nullable_ = nullable;
+  nullable_    = nullable;
 
   LOG_INFO("Init a field with name=%s", name);
   return RC::SUCCESS;
@@ -72,12 +74,10 @@ bool FieldMeta::visible() const { return visible_; }
 
 int FieldMeta::field_id() const { return field_id_; }
 
-bool FieldMeta::nullable() const { return nullable_; }
-
 void FieldMeta::desc(ostream &os) const
 {
   os << "field name=" << name_ << ", type=" << attr_type_to_string(attr_type_) << ", len=" << attr_len_
-     << ", visible=" << (visible_ ? "yes" : "no");
+     << ", visible=" << (visible_ ? "yes" : "no") << ", nullable=" << (nullable_ ? "yes" : "no");
 }
 
 void FieldMeta::to_json(Json::Value &json_value) const
@@ -131,14 +131,10 @@ RC FieldMeta::from_json(const Json::Value &json_value, FieldMeta &field)
     LOG_ERROR("Field id is not an integer. json value=%s", field_id_value.toStyledString().c_str());
     return RC::INTERNAL;
   }
-  // backward compatibility: old meta may not have nullable field
-  bool nullable = true;
-  if (!nullable_value.isNull()) {
-    if (!nullable_value.isBool()) {
-      LOG_ERROR("Nullable is not a bool value. json value=%s", nullable_value.toStyledString().c_str());
-      return RC::INTERNAL;
-    }
-    nullable = nullable_value.asBool();
+  // Backward compatibility: old meta might not contain nullable
+  if (!nullable_value.isNull() && !nullable_value.isBool()) {
+    LOG_ERROR("Nullable is not a bool value. json value=%s", nullable_value.toStyledString().c_str());
+    return RC::INTERNAL;
   }
 
   AttrType type = attr_type_from_string(type_value.asCString());
@@ -152,5 +148,6 @@ RC FieldMeta::from_json(const Json::Value &json_value, FieldMeta &field)
   int         len     = len_value.asInt();
   bool        visible = visible_value.asBool();
   int         field_id  = field_id_value.asInt();
+  bool        nullable = nullable_value.isNull() ? false : nullable_value.asBool();
   return field.init(name, type, offset, len, visible, field_id, nullable);
 }

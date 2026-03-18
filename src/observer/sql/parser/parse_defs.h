@@ -58,7 +58,7 @@ enum CompOp
   EXISTS_OP,    ///< exists (sub query)
   NOT_EXISTS_OP,///< not exists (sub query)
   IS_NULL_OP,   ///< is null
-  IS_NOT_NULL_OP,///< is not null
+  IS_NOT_NULL_OP, ///< is not null
   NO_OP
 };
 
@@ -178,7 +178,7 @@ struct AttrInfoSqlNode
   AttrType type;    ///< Type of attribute
   string   name;    ///< Attribute name
   size_t   length;  ///< Length of attribute
-  bool     nullable = false;  ///< whether this field can be NULL (default: NOT NULL)
+  bool     nullable = false;  ///< Whether this attribute can be NULL
 };
 
 /**

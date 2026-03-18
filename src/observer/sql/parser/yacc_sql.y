@@ -116,6 +116,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
         FROM
         WHERE
         AND
+        IS
         SET
         ON
         LOAD
@@ -130,7 +131,6 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
         FIELDS
         TERMINATED
         ENCLOSED
-        IS
         EQ
         LT
         GT
@@ -200,6 +200,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
 
 /** type 定义了各种解析后的结果输出的是什么类型。类型对应了 union 中的定义的成员变量名称 **/
 %type <number>              type
+%type <number>              opt_nullability
 %type <condition>           condition
 %type <value>               value
 %type <number>              number
@@ -207,7 +208,6 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
 %type <rel_attr>            rel_attr
 %type <attr_infos>          attr_def_list
 %type <attr_info>           attr_def
-%type <number>              opt_nullability
 %type <value_list>          value_list
 %type <condition_list>      where
 %type <condition_list>      condition_list
@@ -553,8 +553,16 @@ value:
       $$ = new Value((int)$1);
       @$ = @1;
     }
+    | '-' NUMBER %prec UMINUS {
+      $$ = new Value((int)(-($2)));
+      @$ = @1;
+    }
     |FLOAT {
       $$ = new Value((float)$1);
+      @$ = @1;
+    }
+    | '-' FLOAT %prec UMINUS {
+      $$ = new Value((float)(-($2)));
       @$ = @1;
     }
     |SSS {
@@ -804,14 +812,18 @@ condition_expr:
       children.push_back(unique_ptr<Expression>($3));
       $$ = new ConjunctionExpr(ConjunctionExpr::Type::OR, children);
     }
-    | expression IS NULL_T {
-      $$ = new IsNullExpr(unique_ptr<Expression>($1), false);
-    }
-    | expression IS NOT NULL_T {
-      $$ = new IsNullExpr(unique_ptr<Expression>($1), true);
-    }
     | expression comp_op expression {
       $$ = new ComparisonExpr($2, unique_ptr<Expression>($1), unique_ptr<Expression>($3));
+    }
+    | expression IS NULL_T {
+      Value v;
+      v.set_null();
+      $$ = new ComparisonExpr(IS_NULL_OP, unique_ptr<Expression>($1), unique_ptr<Expression>(new ValueExpr(v)));
+    }
+    | expression IS NOT NULL_T {
+      Value v;
+      v.set_null();
+      $$ = new ComparisonExpr(IS_NOT_NULL_OP, unique_ptr<Expression>($1), unique_ptr<Expression>(new ValueExpr(v)));
     }
     | expression IN LBRACE select_stmt RBRACE %prec LBRACE {
       $$ = new ComparisonExpr(IN_OP, unique_ptr<Expression>($1), unique_ptr<Expression>(new SubQueryExpr($4->selection)));
@@ -956,28 +968,6 @@ condition:
 
       delete $1;
       delete $3;
-    }
-    | rel_attr IS NULL_T
-    {
-      $$ = new ConditionSqlNode;
-      $$->left_is_attr = 1;
-      $$->left_attr = *$1;
-      $$->right_is_attr = 0;
-      $$->right_value.set_null();
-      $$->comp = IS_NULL_OP;
-
-      delete $1;
-    }
-    | rel_attr IS NOT NULL_T
-    {
-      $$ = new ConditionSqlNode;
-      $$->left_is_attr = 1;
-      $$->left_attr = *$1;
-      $$->right_is_attr = 0;
-      $$->right_value.set_null();
-      $$->comp = IS_NOT_NULL_OP;
-
-      delete $1;
     }
     | value comp_op value 
     {
