@@ -14,10 +14,14 @@ template <class T>
 class SumState
 {
 public:
-  SumState() : value(0) {}
+  SumState() : value(0), has_value(false) {}
   T    value;
+  bool has_value = false;
   void update(const T *values, int size);
-  void update(const T &value) { this->value += value; }
+  void update(const T &v) {
+    this->value += v;
+    has_value = true;
+  }
   template <class U>
   U finalize()
   {

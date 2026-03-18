@@ -9,6 +9,7 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
 #include "common/log/log.h"
+#include "common/value.h"
 #include "storage/common/column.h"
 
 Column::Column(const FieldMeta &meta, size_t size)
@@ -90,12 +91,13 @@ void Column::reset()
   if (data_ != nullptr && own_) {
     delete[] data_;
   }
-  data_      = nullptr;
-  count_     = 0;
-  capacity_  = 0;
-  own_       = false;
-  attr_type_ = AttrType::UNDEFINED;
-  attr_len_  = -1;
+  data_        = nullptr;
+  count_       = 0;
+  capacity_    = 0;
+  own_         = false;
+  attr_type_   = AttrType::UNDEFINED;
+  attr_len_    = -1;
+  null_bitmap_.clear();
 }
 
 RC Column::append_one(const char *data) { return append(data, 1); }
@@ -129,6 +131,10 @@ RC Column::append_value(const Value &value)
     return RC::INTERNAL;
   }
 
+  if (value.attr_type() == AttrType::UNDEFINED) {
+    return append_null();
+  }
+
   // 使用 int 以避免 std::min 不同类型推导问题，兼容评测环境
   const int value_len   = value.length();
   const int attr_len    = attr_len_;
@@ -139,6 +145,24 @@ RC Column::append_value(const Value &value)
     data_[count_ * attr_len_ + total_bytes] = 0;
   }
 
+  count_ += 1;
+  return RC::SUCCESS;
+}
+
+RC Column::append_null()
+{
+  if (!own_ || count_ >= capacity_) {
+    return RC::INTERNAL;
+  }
+  const int idx = count_;
+  const size_t need_bytes = (idx + 8) / 8;
+  if (null_bitmap_.size() < need_bytes) {
+    null_bitmap_.resize(need_bytes, 0);
+  }
+  null_bitmap_[idx / 8] |= (1u << (idx % 8));
+  if (attr_len_ > 0 && data_) {
+    memset(data_ + idx * attr_len_, 0, static_cast<size_t>(attr_len_));
+  }
   count_ += 1;
   return RC::SUCCESS;
 }
@@ -159,6 +183,12 @@ Value Column::get_value(int index) const
   if (index >= count_ || index < 0) {
     return Value();
   }
+  const size_t byte_idx = index / 8;
+  if (byte_idx < null_bitmap_.size() && (null_bitmap_[byte_idx] & (1u << (index % 8))) != 0) {
+    Value v;
+    v.reset();
+    return v;
+  }
   return Value(attr_type_, &data_[index * attr_len_], attr_len_);
 }
 
@@ -177,4 +207,5 @@ void Column::reference(const Column &column)
   this->column_type_ = column.column_type();
   this->attr_type_   = column.attr_type();
   this->attr_len_    = column.attr_len();
+  this->null_bitmap_ = column.null_bitmap_;
 }

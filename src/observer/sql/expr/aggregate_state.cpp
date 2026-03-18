@@ -17,6 +17,10 @@ See the Mulan PSL v2 for more details. */
 template <typename T>
 void SumState<T>::update(const T *values, int size)
 {
+  if (size <= 0) {
+    return;
+  }
+  has_value = true;
 #ifdef USE_SIMD
   if constexpr (is_same<T, float>::value) {
     value += mm256_sum_ps(values, size);
@@ -116,6 +120,15 @@ void* create_aggregate_state(AggregateExpr::Type aggr_type, AttrType attr_type)
 RC aggregate_state_update_by_value(void *state, AggregateExpr::Type aggr_type, AttrType attr_type, const Value& val)
 {
   RC rc = RC::SUCCESS;
+  if (val.attr_type() == AttrType::UNDEFINED) {
+    if (aggr_type == AggregateExpr::Type::SUM || aggr_type == AggregateExpr::Type::AVG ||
+        aggr_type == AggregateExpr::Type::MAX || aggr_type == AggregateExpr::Type::MIN) {
+      return RC::SUCCESS;
+    }
+    if (aggr_type == AggregateExpr::Type::COUNT) {
+      return RC::SUCCESS;
+    }
+  }
   AttrType use_type = (attr_type == AttrType::UNDEFINED) ? AttrType::INTS : attr_type;
   if (aggr_type == AggregateExpr::Type::SUM) {
     if (use_type == AttrType::INTS) {
@@ -171,9 +184,17 @@ RC finialize_aggregate_state(void *state, AggregateExpr::Type aggr_type, AttrTyp
   AttrType use_type = (attr_type == AttrType::UNDEFINED) ? AttrType::INTS : attr_type;
   if ( aggr_type == AggregateExpr::Type::SUM) {
     if (use_type == AttrType::INTS) {
-      append_to_column<SumState<int>, int>(state, col);
+      if (!static_cast<SumState<int>*>(state)->has_value) {
+        rc = col.append_null();
+      } else {
+        append_to_column<SumState<int>, int>(state, col);
+      }
     } else if (use_type == AttrType::FLOATS) {
-      append_to_column<SumState<float>, float>(state, col);
+      if (!static_cast<SumState<float>*>(state)->has_value) {
+        rc = col.append_null();
+      } else {
+        append_to_column<SumState<float>, float>(state, col);
+      }
     } else {
       rc = RC::UNIMPLEMENTED;
     }
@@ -234,12 +255,14 @@ RC aggregate_state_update_by_column(void *state, AggregateExpr::Type aggr_type, 
     return RC::SUCCESS;
   }
   if (aggr_type == AggregateExpr::Type::SUM) {
-    if (use_type == AttrType::INTS) {
-      update_aggregate_state<SumState<int>, int>(state, col);
-    } else if (use_type == AttrType::FLOATS) {
-      update_aggregate_state<SumState<float>, float>(state, col);
-    } else {
-      rc = RC::UNIMPLEMENTED;
+    for (int i = 0; i < col.count(); i++) {
+      Value v = col.get_value(i);
+      if (v.attr_type() != AttrType::UNDEFINED) {
+        rc = aggregate_state_update_by_value(state, AggregateExpr::Type::SUM, use_type, v);
+        if (rc != RC::SUCCESS) {
+          return rc;
+        }
+      }
     }
   } else if (aggr_type == AggregateExpr::Type::AVG) {
     if (use_type == AttrType::INTS) {

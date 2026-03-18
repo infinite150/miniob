@@ -11,9 +11,11 @@ See the Mulan PSL v2 for more details. */
 #pragma once
 
 #include <string.h>
+#include <vector>
 
 #include "storage/field/field_meta.h"
 #include "storage/common/vector_buffer.h"
+#include "common/type/attr_type.h"
 
 /**
  * @brief A column contains multiple values in contiguous memory with a specified type.
@@ -41,6 +43,7 @@ public:
     data_        = new char[capacity_ * attr_len_];
     memcpy(data_, other.data_, capacity_ * attr_len_);
     vector_buffer_ = make_unique<VectorBuffer>();
+    null_bitmap_   = other.null_bitmap_;
   }
   Column(Column &&other)
   {
@@ -83,9 +86,14 @@ public:
   RC append(const char *data, int count);
 
   /**
-   * @brief 获取 index 位置的列值
+   * @brief 获取 index 位置的列值，若该位为 NULL 则返回 UNDEFINED
    */
   Value get_value(int index) const;
+
+  /**
+   * @brief 追加一个 NULL 值（仅当列支持 nullable 时使用）
+   */
+  RC append_null();
 
   RC copy_to(void *dest, int start_rows, int insert_rows) const
   {
@@ -142,4 +150,6 @@ private:
   /// 列类型
   Type                     column_type_   = Type::NORMAL_COLUMN;
   unique_ptr<VectorBuffer> vector_buffer_ = nullptr;
+  /// 可选：NULL 位图，若存在则 get_value 会据此返回 UNDEFINED
+  std::vector<uint8_t>     null_bitmap_;
 };

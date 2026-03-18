@@ -52,7 +52,7 @@ RC SumAggregator::accumulate(const Value &value)
 RC SumAggregator::evaluate(Value &result)
 {
   if (value_.attr_type() == AttrType::UNDEFINED) {
-    result.set_int(0);
+    result.reset();  // SUM 全 NULL 或无行时返回 NULL，符合 SQL 语义
     return RC::SUCCESS;
   }
   result = value_;
