@@ -39,9 +39,11 @@ DefaultConditionFilter::~DefaultConditionFilter() {}
 
 RC DefaultConditionFilter::init(const ConDesc &left, const ConDesc &right, AttrType attr_type, CompOp comp_op)
 {
-  if (attr_type <= AttrType::UNDEFINED || attr_type >= AttrType::MAXTYPE) {
-    LOG_ERROR("Invalid condition with unsupported attribute type: %d", attr_type);
-    return RC::INVALID_ARGUMENT;
+  if (comp_op != IS_NULL_OP && comp_op != IS_NOT_NULL_OP) {
+    if (attr_type <= AttrType::UNDEFINED || attr_type >= AttrType::MAXTYPE) {
+      LOG_ERROR("Invalid condition with unsupported attribute type: %d", attr_type);
+      return RC::INVALID_ARGUMENT;
+    }
   }
 
   if (comp_op < EQUAL_TO || comp_op >= NO_OP) {
@@ -107,18 +109,17 @@ RC DefaultConditionFilter::init(Table &table, const ConditionSqlNode &condition)
     right.attr_offset = 0;
   }
 
+  // IS NULL / IS NOT NULL and NULL-constant comparisons: skip type compatibility check
+  if (condition.comp == IS_NULL_OP || condition.comp == IS_NOT_NULL_OP ||
+      type_left == AttrType::UNDEFINED || type_right == AttrType::UNDEFINED) {
+    AttrType attr_type = (type_left != AttrType::UNDEFINED) ? type_left : type_right;
+    return init(left, right, attr_type, condition.comp);
+  }
+
   // 校验和转换
-  //  if (!field_type_compare_compatible_table[type_left][type_right]) {
-  //    // 不能比较的两个字段， 要把信息传给客户端
-  //    return RC::SCHEMA_FIELD_TYPE_MISMATCH;
-  //  }
-  // NOTE：这里原来没有实现不同类型的数据比较，比如整数跟浮点数之间的对比。
-  // 这里针对 DATE 与 CHARS 的组合做特殊处理：当字段是 DATE，而常量是字符串时，
-  // 尝试把字符串解析成 DATE；解析失败则认为类型不匹配。
   if (type_left != type_right) {
     RC rc = RC::SUCCESS;
 
-    // 左边是字段，右边是常量
     if (left.is_attr && !right.is_attr && type_left == AttrType::DATES && type_right == AttrType::CHARS) {
       Value cast_value;
       rc = DataType::type_instance(AttrType::DATES)->set_value_from_str(cast_value, right.value.get_string());
@@ -130,7 +131,6 @@ RC DefaultConditionFilter::init(Table &table, const ConditionSqlNode &condition)
       right.value  = std::move(cast_value);
       type_right   = AttrType::DATES;
     }
-    // 右边是字段，左边是常量
     else if (right.is_attr && !left.is_attr && type_right == AttrType::DATES && type_left == AttrType::CHARS) {
       Value cast_value;
       rc = DataType::type_instance(AttrType::DATES)->set_value_from_str(cast_value, left.value.get_string());
@@ -143,7 +143,6 @@ RC DefaultConditionFilter::init(Table &table, const ConditionSqlNode &condition)
       type_left  = AttrType::DATES;
     }
 
-    // 其他类型组合目前仍然认为不支持
     if (type_left != type_right) {
       return RC::SCHEMA_FIELD_TYPE_MISMATCH;
     }
@@ -183,7 +182,13 @@ bool DefaultConditionFilter::filter(const Record &rec) const
     right_value.set_value(right_.value);
   }
 
-  // NULL compared with anything yields false (including <>)
+  if (comp_op_ == IS_NULL_OP) {
+    return left_value.is_null();
+  }
+  if (comp_op_ == IS_NOT_NULL_OP) {
+    return !left_value.is_null();
+  }
+
   if (left_value.is_null() || right_value.is_null()) {
     return false;
   }
