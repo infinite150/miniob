@@ -63,6 +63,11 @@ private:
   ConDesc  right_;
   AttrType attr_type_ = AttrType::UNDEFINED;
   CompOp   comp_op_   = NO_OP;
+  /// 行尾 NULL bitmap 起始偏移（来自 TableMeta）；未设置时为 -1
+  int null_bitmap_offset_ = -1;
+  /// 左右属性在表字段序列中的下标，用于读 bitmap；-1 表示非常量路径或未解析
+  int left_field_idx_  = -1;
+  int right_field_idx_ = -1;
 };
 
 class CompositeConditionFilter : public ConditionFilter

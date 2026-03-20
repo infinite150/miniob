@@ -116,6 +116,9 @@ void* create_aggregate_state(AggregateExpr::Type aggr_type, AttrType attr_type)
 RC aggregate_state_update_by_value(void *state, AggregateExpr::Type aggr_type, AttrType attr_type, const Value& val)
 {
   RC rc = RC::SUCCESS;
+  if (val.attr_type() == AttrType::UNDEFINED) {
+    return RC::SUCCESS;
+  }
   AttrType use_type = (attr_type == AttrType::UNDEFINED) ? AttrType::INTS : attr_type;
   if (aggr_type == AggregateExpr::Type::SUM) {
     if (use_type == AttrType::INTS) {

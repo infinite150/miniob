@@ -20,6 +20,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/table/table.h"
 #include <math.h>
 #include <stddef.h>
+#include <cstdint>
 
 using namespace common;
 
@@ -53,6 +54,9 @@ RC DefaultConditionFilter::init(const ConDesc &left, const ConDesc &right, AttrT
   right_     = right;
   attr_type_ = attr_type;
   comp_op_   = comp_op;
+  null_bitmap_offset_ = -1;
+  left_field_idx_     = -1;
+  right_field_idx_    = -1;
   return RC::SUCCESS;
 }
 
@@ -146,7 +150,48 @@ RC DefaultConditionFilter::init(Table &table, const ConditionSqlNode &condition)
     }
   }
 
-  return init(left, right, type_left, condition.comp);
+  RC rc = init(left, right, type_left, condition.comp);
+  if (rc != RC::SUCCESS) {
+    return rc;
+  }
+
+  null_bitmap_offset_ = table_meta.null_bitmap_offset();
+  left_field_idx_     = -1;
+  right_field_idx_    = -1;
+  if (left.is_attr) {
+    const FieldMeta *field_left = table_meta.field(condition.left_attr.attribute_name.c_str());
+    for (int i = 0; i < table_meta.field_num(); i++) {
+      if (table_meta.field(i) == field_left) {
+        left_field_idx_ = i;
+        break;
+      }
+    }
+  }
+  if (right.is_attr) {
+    const FieldMeta *field_right = table_meta.field(condition.right_attr.attribute_name.c_str());
+    for (int i = 0; i < table_meta.field_num(); i++) {
+      if (table_meta.field(i) == field_right) {
+        right_field_idx_ = i;
+        break;
+      }
+    }
+  }
+  return RC::SUCCESS;
+}
+
+static bool record_field_is_null(const Record &rec, int bitmap_offset, int field_idx)
+{
+  if (bitmap_offset < 0 || field_idx < 0) {
+    return false;
+  }
+  const int bitmap_bytes = (field_idx + 8) / 8;
+  if (rec.len() < bitmap_offset + bitmap_bytes) {
+    return false;
+  }
+  const uint8_t *bitmap = reinterpret_cast<const uint8_t *>(rec.data() + bitmap_offset);
+  const int        byte_index = field_idx / 8;
+  const int        bit_index  = field_idx % 8;
+  return (bitmap[byte_index] & static_cast<uint8_t>(1U << bit_index)) != 0;
 }
 
 bool DefaultConditionFilter::filter(const Record &rec) const
@@ -154,18 +199,31 @@ bool DefaultConditionFilter::filter(const Record &rec) const
   Value left_value;
   Value right_value;
 
-  if (left_.is_attr) {  // value
-    left_value.set_type(attr_type_);
-    left_value.set_data(rec.data() + left_.attr_offset, left_.attr_length);
+  if (left_.is_attr) {
+    if (record_field_is_null(rec, null_bitmap_offset_, left_field_idx_)) {
+      left_value.set_null();
+    } else {
+      left_value.set_type(attr_type_);
+      left_value.set_data(rec.data() + left_.attr_offset, left_.attr_length);
+    }
   } else {
     left_value.set_value(left_.value);
   }
 
   if (right_.is_attr) {
-    right_value.set_type(attr_type_);
-    right_value.set_data(rec.data() + right_.attr_offset, right_.attr_length);
+    if (record_field_is_null(rec, null_bitmap_offset_, right_field_idx_)) {
+      right_value.set_null();
+    } else {
+      right_value.set_type(attr_type_);
+      right_value.set_data(rec.data() + right_.attr_offset, right_.attr_length);
+    }
   } else {
     right_value.set_value(right_.value);
+  }
+
+  // WHERE：比较遇 NULL 视为未知，不选中该行（与 ComparisonExpr 一致）
+  if (left_value.is_null() || right_value.is_null()) {
+    return false;
   }
 
   int cmp_result = left_value.compare(right_value);
