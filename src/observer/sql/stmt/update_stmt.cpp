@@ -68,7 +68,13 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update, Stmt *&stmt)
         return RC::INVALID_ARGUMENT;
       }
       Value value_to_set = p.second;
-      if (field_meta->type() != value_to_set.attr_type()) {
+      if (value_to_set.is_null()) {
+        if (!field_meta->nullable()) {
+          LOG_WARN("cannot set NULL on NOT NULL field. table=%s, field=%s", table_name, field_name);
+          return RC::INVALID_ARGUMENT;
+        }
+        // NULL 不应走 cast_to：Value::cast_to(UNDEFINED -> CHARS) 会 UNSUPPORTED
+      } else if (field_meta->type() != value_to_set.attr_type()) {
         Value casted;
         rc = Value::cast_to(value_to_set, field_meta->type(), casted);
         if (OB_FAIL(rc)) {
@@ -102,7 +108,12 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update, Stmt *&stmt)
       return RC::INVALID_ARGUMENT;
     }
     Value value_to_set = update.value;
-    if (field_meta->type() != value_to_set.attr_type()) {
+    if (value_to_set.is_null()) {
+      if (!field_meta->nullable()) {
+        LOG_WARN("cannot set NULL on NOT NULL field. table=%s, field=%s", table_name, field_name);
+        return RC::INVALID_ARGUMENT;
+      }
+    } else if (field_meta->type() != value_to_set.attr_type()) {
       Value casted;
       rc = Value::cast_to(value_to_set, field_meta->type(), casted);
       if (OB_FAIL(rc)) {
