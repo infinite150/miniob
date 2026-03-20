@@ -238,6 +238,11 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
                                      : static_cast<Expression *>(new ValueExpr(filter_obj_right.value)));
 
     if (left->value_type() != right->value_type()) {
+      // NULL 字面量（UNDEFINED）与列比较：不做隐式转换，由 ComparisonExpr 按 NULL 语义处理。
+      // 否则 INTS vs UNDEFINED 的 cast_cost 常为“不支持”，会返回 UNSUPPORTED，导致 UPDATE/DELETE 整句失败。
+      if (left->value_type() == AttrType::UNDEFINED || right->value_type() == AttrType::UNDEFINED) {
+        // keep left/right as built
+      } else {
       auto left_to_right_cost = implicit_cast_cost(left->value_type(), right->value_type());
       auto right_to_left_cost = implicit_cast_cost(right->value_type(), left->value_type());
       if (left_to_right_cost <= right_to_left_cost && left_to_right_cost != INT32_MAX) {
@@ -273,6 +278,7 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
         rc = RC::UNSUPPORTED;
         LOG_WARN("unsupported cast from %s to %s", attr_type_to_string(left->value_type()), attr_type_to_string(right->value_type()));
         return rc;
+      }
       }
     }
 
