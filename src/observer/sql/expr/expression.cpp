@@ -1301,10 +1301,10 @@ RC get_value_for_update_assignment(Expression &expr, const Tuple &tuple, Trx *tr
         if (OB_FAIL(rc)) {
           return rc;
         }
-        return a->calc_value(left_val, right_val, value);
+        return a->eval_from_values(left_val, right_val, value);
       }
       Value dummy;
-      return a->calc_value(left_val, dummy, value);
+      return a->eval_from_values(left_val, dummy, value);
     }
     default: {
       return expr.get_value(tuple, value);

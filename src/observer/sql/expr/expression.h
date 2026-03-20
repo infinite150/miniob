@@ -464,6 +464,12 @@ public:
   unique_ptr<Expression> &left() { return left_; }
   unique_ptr<Expression> &right() { return right_; }
 
+  /// 由已求得的左右字面值计算算术结果（如 UPDATE SET 中对子表达式递归求值）
+  RC eval_from_values(const Value &left_value, const Value &right_value, Value &value) const
+  {
+    return calc_value(left_value, right_value, value);
+  }
+
 private:
   RC calc_value(const Value &left_value, const Value &right_value, Value &value) const;
 
