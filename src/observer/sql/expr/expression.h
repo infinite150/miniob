@@ -27,6 +27,7 @@ See the Mulan PSL v2 for more details. */
 class Tuple;
 class Db;
 class Session;
+class Trx;
 
 /**
  * @defgroup Expression
@@ -288,6 +289,8 @@ public:
   AttrType value_type() const override { return cast_type_; }
 
   unique_ptr<Expression> &child() { return child_; }
+
+  RC apply_cast_to(const Value &src, Value &dst) const { return cast(src, dst); }
 
 private:
   RC cast(const Value &value, Value &cast_value) const;
@@ -726,3 +729,6 @@ private:
   mutable Trx *      trx_ = nullptr;
   SubQueryExpr *     parent_ = nullptr;  // 嵌套子查询时，内层使用父层的 parent_tuple
 };
+
+/// UPDATE SET 中求值：为子查询自动 open/close；CAST/算术递归处理子查询
+RC get_value_for_update_assignment(Expression &expr, const Tuple &tuple, Trx *trx, Value &value);

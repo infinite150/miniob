@@ -184,8 +184,9 @@ RC SubQueryExpr::get_value(const Tuple &tuple, Value &value) const
   RC rc = physical_oper_->next();
   if (rc != RC::SUCCESS) {
     if (rc == RC::RECORD_EOF) {
-      // Empty subquery: set value for API consistency; caller uses rc to detect
+      // 标量子查询无行：结果为 NULL（与 SQL 语义一致）
       value.set_null();
+      return RC::SUCCESS;
     }
     return rc;
   }

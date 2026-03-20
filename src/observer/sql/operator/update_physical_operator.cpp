@@ -13,12 +13,16 @@ See the Mulan PSL v2 for more details. */
 #include <unordered_map>
 
 #include "common/log/log.h"
+#include "common/value.h"
+#include "sql/expr/expression.h"
+#include "sql/expr/expression_iterator.h"
 #include "storage/table/table.h"
 #include "storage/trx/trx.h"
 #include "sql/expr/tuple.h"
 
-UpdatePhysicalOperator::UpdatePhysicalOperator(Table *table, const vector<const FieldMeta *> &field_metas, const vector<Value> &values)
-    : table_(table), field_metas_(field_metas), values_(values), trx_(nullptr)
+UpdatePhysicalOperator::UpdatePhysicalOperator(
+    Table *table, const vector<const FieldMeta *> &field_metas, vector<unique_ptr<Expression>> assignment_exprs)
+    : table_(table), field_metas_(field_metas), assignment_exprs_(std::move(assignment_exprs)), trx_(nullptr)
 {}
 
 RC UpdatePhysicalOperator::open(Trx *trx)
@@ -30,6 +34,12 @@ RC UpdatePhysicalOperator::open(Trx *trx)
   if (children_.empty()) {
     LOG_WARN("UpdatePhysicalOperator::open has no child, table=%s", table_ ? table_->name() : "null");
     return RC::SUCCESS;
+  }
+
+  for (auto &e : assignment_exprs_) {
+    if (e) {
+      ExpressionIterator::for_each_subquery(*e, [trx](SubQueryExpr &sq) { sq.set_trx(trx); });
+    }
   }
 
   RC rc = children_[0]->open(trx);
@@ -144,12 +154,12 @@ RC UpdatePhysicalOperator::build_new_record(const Record &old_record, Record &ne
   }
 
   const TableMeta &table_meta = table_->table_meta();
-  const int        sys_fields = table_meta.sys_field_num();
-  const int        user_fields = table_meta.field_num() - sys_fields;
+  const int        sys_fields   = table_meta.sys_field_num();
+  const int        user_fields  = table_meta.field_num() - sys_fields;
 
-  unordered_map<string, const Value *> update_map;
-  for (size_t i = 0; i < field_metas_.size() && i < values_.size(); i++) {
-    update_map[field_metas_[i]->name()] = &values_[i];
+  unordered_map<string, Expression *> update_map;
+  for (size_t i = 0; i < field_metas_.size() && i < assignment_exprs_.size(); i++) {
+    update_map[field_metas_[i]->name()] = assignment_exprs_[i].get();
   }
 
   RowTuple tuple;
@@ -166,7 +176,24 @@ RC UpdatePhysicalOperator::build_new_record(const Record &old_record, Record &ne
     }
     auto it = update_map.find(field->name());
     if (it != update_map.end()) {
-      values.emplace_back(*it->second);
+      Value cell;
+      RC rc = get_value_for_update_assignment(*it->second, tuple, trx_, cell);
+      if (OB_FAIL(rc)) {
+        return rc;
+      }
+      if (cell.is_null()) {
+        if (!field->nullable()) {
+          return RC::INVALID_ARGUMENT;
+        }
+      } else if (field->type() != cell.attr_type()) {
+        Value casted;
+        rc = Value::cast_to(cell, field->type(), casted);
+        if (OB_FAIL(rc)) {
+          return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+        }
+        cell = std::move(casted);
+      }
+      values.emplace_back(std::move(cell));
     } else {
       Value cell;
       RC rc = tuple.cell_at(i + sys_fields, cell);

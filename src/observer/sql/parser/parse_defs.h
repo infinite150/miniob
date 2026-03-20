@@ -161,11 +161,9 @@ struct DeleteSqlNode
  */
 struct UpdateSqlNode
 {
-  string                   relation_name;   ///< Relation to update
-  string                   attribute_name;  ///< 更新的字段（兼容单字段）
-  Value                    value;           ///< 更新的值（兼容单字段）
-  vector<pair<string, Value>> updates;      ///< 多列更新：(字段名, 值) 列表，非空时优先使用
-  vector<ConditionSqlNode> conditions;
+  string                                      relation_name;  ///< Relation to update
+  vector<pair<string, unique_ptr<Expression>>> updates;      ///< 多列更新：(字段名, 表达式)
+  vector<ConditionSqlNode>                    conditions;
 };
 
 /**

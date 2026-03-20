@@ -89,6 +89,9 @@ public:
   static RC create(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
       Expression *condition, FilterStmt *&stmt);
 
+  /// 为表达式树中的子查询生成 SelectStmt（UPDATE SET、WHERE 等共用）
+  static RC prepare_subqueries_in_expression(Expression *expr, Db *db, unordered_map<string, Table *> *tables);
+
   static RC create_filter_unit(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
       const ConditionSqlNode &condition, FilterUnit *&filter_unit);
 
