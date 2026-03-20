@@ -57,6 +57,8 @@ enum CompOp
   NOT_IN_OP,    ///< not in (sub query)
   EXISTS_OP,    ///< exists (sub query)
   NOT_EXISTS_OP,///< not exists (sub query)
+  IS_NULL_OP,   ///< IS NULL（仅用于简单 condition，如 WHERE col IS NULL）
+  IS_NOT_NULL_OP, ///< IS NOT NULL
   NO_OP
 };
 

@@ -38,6 +38,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/stmt/update_stmt.h"
 
 #include "sql/expr/expression_iterator.h"
+#include "sql/expr/expression.h"
 
 using namespace std;
 using namespace common;
@@ -228,6 +229,13 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
   for (const FilterUnit *filter_unit : filter_units) {
     const FilterObj &filter_obj_left  = filter_unit->left();
     const FilterObj &filter_obj_right = filter_unit->right();
+
+    if (filter_unit->comp() == IS_NULL_OP || filter_unit->comp() == IS_NOT_NULL_OP) {
+      unique_ptr<Expression> fld(new FieldExpr(filter_obj_left.field));
+      bool                   is_not = (filter_unit->comp() == IS_NOT_NULL_OP);
+      cmp_exprs.push_back(make_unique<IsNullExpr>(std::move(fld), is_not));
+      continue;
+    }
 
     unique_ptr<Expression> left(filter_obj_left.is_attr
                                     ? static_cast<Expression *>(new FieldExpr(filter_obj_left.field))

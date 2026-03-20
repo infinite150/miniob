@@ -142,6 +142,32 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
   RC rc = RC::SUCCESS;
 
   CompOp comp = condition.comp;
+
+  if (comp == IS_NULL_OP || comp == IS_NOT_NULL_OP) {
+    if (!condition.left_is_attr) {
+      LOG_WARN("IS [NOT] NULL expects column on left side");
+      return RC::INVALID_ARGUMENT;
+    }
+    Table           *table = nullptr;
+    const FieldMeta *field = nullptr;
+    rc = get_table_and_field(db, default_table, tables, condition.left_attr, table, field);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("cannot find attr for IS NULL predicate");
+      return rc;
+    }
+    filter_unit = new FilterUnit;
+    FilterObj left_obj;
+    left_obj.init_attr(Field(table, field));
+    filter_unit->set_left(left_obj);
+    Value dummy;
+    dummy.set_int(0);
+    FilterObj right_obj;
+    right_obj.init_value(dummy);
+    filter_unit->set_right(right_obj);
+    filter_unit->set_comp(comp);
+    return RC::SUCCESS;
+  }
+
   if (comp < EQUAL_TO || comp >= NO_OP) {
     LOG_WARN("invalid compare operator : %d", comp);
     return RC::INVALID_ARGUMENT;
