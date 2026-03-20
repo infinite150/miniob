@@ -13,11 +13,11 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/physical_operator.h"
 #include "sql/expr/tuple.h"
 #include "common/lang/vector.h"
-#include "common/lang/memory.h"
+#include "sql/expr/expression.h"
+#include <memory>
 
 class Trx;
 class FieldMeta;
-class Expression;
 
 /**
  * @brief 物理算子：更新（与 Insert/Delete 类似，通过子算子扫描待更新行，逐行 delete + insert 实现）
@@ -26,8 +26,8 @@ class Expression;
 class UpdatePhysicalOperator : public PhysicalOperator
 {
 public:
-  UpdatePhysicalOperator(
-      Table *table, const vector<const FieldMeta *> &field_metas, vector<unique_ptr<Expression>> assignment_exprs);
+  UpdatePhysicalOperator(Table *table, const vector<const FieldMeta *> &field_metas,
+      vector<std::unique_ptr<Expression>> &&set_exprs);
   virtual ~UpdatePhysicalOperator() = default;
 
   PhysicalOperatorType type() const override { return PhysicalOperatorType::UPDATE; }
@@ -43,12 +43,12 @@ public:
   Tuple *current_tuple() override { return nullptr; }
 
 private:
-  /// 根据旧记录与 SET 表达式构造新记录（仅替换目标字段）
+  /// 根据旧记录与 SET 值构造新记录（仅替换目标字段）
   RC build_new_record(const Record &old_record, Record &new_record) const;
 
 private:
-  Table                           *table_       = nullptr;
-  vector<const FieldMeta *>        field_metas_;
-  vector<unique_ptr<Expression>> assignment_exprs_;
-  Trx                             *trx_         = nullptr;
+  Table                    *table_       = nullptr;
+  vector<const FieldMeta *> field_metas_;
+  vector<std::unique_ptr<Expression>> set_exprs_;
+  Trx                      *trx_         = nullptr;
 };

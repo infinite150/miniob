@@ -176,14 +176,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
 }
 
 %destructor { if ($$) { for (auto *p : *$$) delete p; delete $$; } } <value_list_groups>
-%destructor {
-  if ($$) {
-    for (auto &p : *$$) {
-      delete p.second;
-    }
-    delete $$;
-  }
-} <update_list>
+%destructor { delete $$; } <update_list>
 %destructor { delete $$; } <condition>
 %destructor { delete $$; } <value>
 %destructor { delete $$; } <rel_attr>
@@ -603,7 +596,7 @@ update_stmt:      /*  update 语句的语法解析树*/
       $$ = new ParsedSqlNode(SCF_UPDATE);
       $$->update.relation_name = $2;
       if ($4 != nullptr && !$4->empty()) {
-        for (auto &p : *$4) {
+        for (auto &p : *($4)) {
           $$->update.updates.emplace_back(p.first, unique_ptr<Expression>(p.second));
         }
         delete $4;

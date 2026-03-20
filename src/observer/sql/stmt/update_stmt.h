@@ -17,7 +17,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/sys/rc.h"
 #include "sql/stmt/stmt.h"
 #include "common/lang/vector.h"
-#include "common/lang/memory.h"
+#include <memory>
 
 class Table;
 class FilterStmt;
@@ -32,8 +32,7 @@ class UpdateStmt : public Stmt
 {
 public:
   UpdateStmt() = default;
-  UpdateStmt(Table *table, vector<const FieldMeta *> field_metas, vector<unique_ptr<Expression>> assignment_exprs,
-      FilterStmt *filter_stmt);
+  UpdateStmt(Table *table, vector<const FieldMeta *> field_metas, vector<std::unique_ptr<Expression>> set_exprs, FilterStmt *filter_stmt);
   ~UpdateStmt() override;
 
   StmtType type() const override { return StmtType::UPDATE; }
@@ -43,14 +42,15 @@ public:
 
 public:
   Table *table() const { return table_; }
-  const vector<const FieldMeta *>           &field_metas() const { return field_metas_; }
-  vector<unique_ptr<Expression>>       &assignment_expressions() { return assignment_exprs_; }
-  const vector<unique_ptr<Expression>> &assignment_expressions() const { return assignment_exprs_; }
-  FilterStmt *filter_stmt() const { return filter_stmt_; }
+  const vector<const FieldMeta *> &field_metas() const { return field_metas_; }
+  const vector<std::unique_ptr<Expression>> &set_exprs() const { return set_exprs_; }
+  vector<std::unique_ptr<Expression>> &      set_exprs_mut() { return set_exprs_; }
+  const FieldMeta *field_meta() const { return field_metas_.empty() ? nullptr : field_metas_[0]; }
+  FilterStmt      *filter_stmt() const { return filter_stmt_; }
 
 private:
-  Table                           *table_        = nullptr;
-  vector<const FieldMeta *>        field_metas_;
-  vector<unique_ptr<Expression>> assignment_exprs_;
-  FilterStmt                      *filter_stmt_ = nullptr;
+  Table                    *table_        = nullptr;
+  vector<const FieldMeta *> field_metas_;
+  vector<std::unique_ptr<Expression>> set_exprs_;
+  FilterStmt               *filter_stmt_ = nullptr;
 };

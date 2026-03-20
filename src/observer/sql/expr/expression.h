@@ -27,7 +27,6 @@ See the Mulan PSL v2 for more details. */
 class Tuple;
 class Db;
 class Session;
-class Trx;
 
 /**
  * @defgroup Expression
@@ -290,8 +289,6 @@ public:
 
   unique_ptr<Expression> &child() { return child_; }
 
-  RC apply_cast_to(const Value &src, Value &dst) const { return cast(src, dst); }
-
 private:
   RC cast(const Value &value, Value &cast_value) const;
 
@@ -463,12 +460,6 @@ public:
 
   unique_ptr<Expression> &left() { return left_; }
   unique_ptr<Expression> &right() { return right_; }
-
-  /// 由已求得的左右字面值计算算术结果（如 UPDATE SET 中对子表达式递归求值）
-  RC eval_from_values(const Value &left_value, const Value &right_value, Value &value) const
-  {
-    return calc_value(left_value, right_value, value);
-  }
 
 private:
   RC calc_value(const Value &left_value, const Value &right_value, Value &value) const;
@@ -735,6 +726,3 @@ private:
   mutable Trx *      trx_ = nullptr;
   SubQueryExpr *     parent_ = nullptr;  // 嵌套子查询时，内层使用父层的 parent_tuple
 };
-
-/// UPDATE SET 中求值：为子查询自动 open/close；CAST/算术递归处理子查询
-RC get_value_for_update_assignment(Expression &expr, const Tuple &tuple, Trx *trx, Value &value);

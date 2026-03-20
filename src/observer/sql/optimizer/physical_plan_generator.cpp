@@ -120,17 +120,21 @@ RC PhysicalPlanGenerator::create_plan(UpdateLogicalOperator &update_oper, unique
     }
   }
 
-  for (auto &e : update_oper.assignment_expressions()) {
-    if (e) {
-      ExpressionIterator::for_each_subquery(*e, [session](SubQueryExpr &sq) {
-        sq.generate_logical_oper();
-        sq.generate_physical_oper(session);
-      });
+  // UPDATE SET 表达式可能包含标量子查询，需要在生成物理算子时先构建其物理执行计划
+  for (const auto &expr_ptr : update_oper.set_exprs()) {
+    if (expr_ptr == nullptr) {
+      continue;
     }
+    ExpressionIterator::for_each_subquery(*expr_ptr, [session](SubQueryExpr &sq) {
+      sq.generate_logical_oper();
+      sq.generate_physical_oper(session);
+    });
   }
 
   oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(
-      update_oper.table(), update_oper.field_metas(), std::move(update_oper.assignment_expressions())));
+      update_oper.table(),
+      update_oper.field_metas(),
+      std::move(update_oper.set_exprs_mut())));
   if (child_physical_oper) {
     oper->add_child(std::move(child_physical_oper));
   }

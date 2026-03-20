@@ -9,7 +9,6 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
 #include "common/log/log.h"
-#include "sql/expr/expression.h"
 #include "sql/optimizer/cascade/implementation_rules.h"
 #include "sql/operator/table_get_logical_operator.h"
 #include "sql/operator/table_scan_physical_operator.h"
@@ -23,7 +22,6 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/calc_physical_operator.h"
 #include "sql/operator/delete_logical_operator.h"
 #include "sql/operator/delete_physical_operator.h"
-#include "sql/expr/expression_iterator.h"
 #include "sql/operator/update_logical_operator.h"
 #include "sql/operator/update_physical_operator.h"
 #include "sql/operator/predicate_logical_operator.h"
@@ -197,14 +195,8 @@ void LogicalUpdateToUpdate::transform(OperatorNode *input,
 {
   auto update_oper = dynamic_cast<UpdateLogicalOperator *>(input);
 
-  for (auto &e : update_oper->assignment_expressions()) {
-    if (e) {
-      ExpressionIterator::for_each_subquery(*e, [](SubQueryExpr &sq) { sq.generate_logical_oper(); });
-    }
-  }
-
-  auto update_phys_oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(
-      update_oper->table(), update_oper->field_metas(), std::move(update_oper->assignment_expressions())));
+  auto update_phys_oper = unique_ptr<PhysicalOperator>(
+      new UpdatePhysicalOperator(update_oper->table(), update_oper->field_metas(), std::move(update_oper->set_exprs_mut())));
   for (auto &child : update_oper->children()) {
     update_phys_oper->add_general_child(child.get());
   }

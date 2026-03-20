@@ -23,6 +23,7 @@ See the Mulan PSL v2 for more details. */
 #include "event/session_event.h"
 #include "event/sql_event.h"
 #include "sql/operator/logical_operator.h"
+#include "sql/operator/update_logical_operator.h"
 #include "sql/operator/table_get_logical_operator.h"
 #include "sql/stmt/stmt.h"
 #include "sql/expr/expression_iterator.h"
@@ -53,10 +54,68 @@ static bool plan_has_subquery(LogicalOperator *oper)
       }
     }
   }
+  if (oper->type() == LogicalOperatorType::UPDATE) {
+    auto *update = static_cast<UpdateLogicalOperator *>(oper);
+    for (auto &expr : update->set_exprs()) {
+      if (expr) {
+        ExpressionIterator::for_each_subquery(*expr, mark_found);
+        if (found) return true;
+      }
+    }
+  }
   for (auto &child : oper->children()) {
     if (plan_has_subquery(child.get())) return true;
   }
   return false;
+}
+
+static RC generate_subquery_physical_plans(LogicalOperator *oper, Session *session)
+{
+  if (oper == nullptr || session == nullptr) {
+    return RC::INVALID_ARGUMENT;
+  }
+
+  RC rc = RC::SUCCESS;
+  auto gen = [&rc, session](SubQueryExpr &sq) {
+    if (rc != RC::SUCCESS) {
+      return;
+    }
+    rc = sq.generate_logical_oper();
+    if (rc != RC::SUCCESS) {
+      return;
+    }
+    rc = sq.generate_physical_oper(session);
+  };
+
+  for (auto &expr : oper->expressions()) {
+    if (rc != RC::SUCCESS) return rc;
+    if (!expr) continue;
+    ExpressionIterator::for_each_subquery(*expr, gen);
+  }
+
+  if (oper->type() == LogicalOperatorType::TABLE_GET) {
+    auto *tget = static_cast<TableGetLogicalOperator *>(oper);
+    for (auto &expr : tget->predicates()) {
+      if (rc != RC::SUCCESS) return rc;
+      if (!expr) continue;
+      ExpressionIterator::for_each_subquery(*expr, gen);
+    }
+  }
+
+  if (oper->type() == LogicalOperatorType::UPDATE) {
+    auto *update = static_cast<UpdateLogicalOperator *>(oper);
+    for (auto &expr : update->set_exprs()) {
+      if (rc != RC::SUCCESS) return rc;
+      if (!expr) continue;
+      ExpressionIterator::for_each_subquery(*expr, gen);
+    }
+  }
+
+  for (auto &child : oper->children()) {
+    if (rc != RC::SUCCESS) return rc;
+    rc = generate_subquery_physical_plans(child.get(), session);
+  }
+  return rc;
 }
 
 RC OptimizeStage::handle_request(SQLStageEvent *sql_event)
@@ -86,6 +145,13 @@ RC OptimizeStage::handle_request(SQLStageEvent *sql_event)
   // TODO: error handle
   unique_ptr<PhysicalOperator> physical_operator;
   if (sql_event->session_event()->session()->use_cascade()) {
+    // cascade 分支不会走 PhysicalPlanGenerator，因此需要在这里为子查询先生成 physical plan
+    //（否则 SubQueryExpr 的 physical_oper_ 为空，执行时会失败）。
+    rc = generate_subquery_physical_plans(logical_operator.get(), sql_event->session_event()->session());
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to generate subquery physical plans for cascade. rc=%s", strrc(rc));
+      return rc;
+    }
     physical_operator = optimizer.optimize(logical_operator.get());
     if (!physical_operator) {
       rc = RC::INTERNAL;

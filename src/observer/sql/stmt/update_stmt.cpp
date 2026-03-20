@@ -13,19 +13,21 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include "sql/stmt/update_stmt.h"
-#include "common/lang/unordered_map.h"
 #include "common/log/log.h"
 #include "common/lang/string.h"
 #include "common/value.h"
-#include "sql/expr/expression.h"
-#include "sql/parser/expression_binder.h"
 #include "sql/stmt/filter_stmt.h"
+#include "sql/parser/expression_binder.h"
 #include "storage/db/db.h"
 #include "storage/table/table.h"
+#include "sql/expr/expression.h"
 
-UpdateStmt::UpdateStmt(Table *table, vector<const FieldMeta *> field_metas, vector<unique_ptr<Expression>> assignment_exprs,
-    FilterStmt *filter_stmt)
-    : table_(table), field_metas_(std::move(field_metas)), assignment_exprs_(std::move(assignment_exprs)), filter_stmt_(filter_stmt)
+UpdateStmt::UpdateStmt(Table *table, vector<const FieldMeta *> field_metas,
+    vector<std::unique_ptr<Expression>> set_exprs, FilterStmt *filter_stmt)
+    : table_(table),
+      field_metas_(std::move(field_metas)),
+      set_exprs_(std::move(set_exprs)),
+      filter_stmt_(filter_stmt)
 {}
 
 UpdateStmt::~UpdateStmt()
@@ -46,13 +48,8 @@ RC UpdateStmt::create(Db *db, UpdateSqlNode &update, Stmt *&stmt)
     return RC::INVALID_ARGUMENT;
   }
 
-  vector<const FieldMeta *> field_metas;
-  vector<unique_ptr<Expression>> assignment_exprs;
-
-  if (update.updates.empty()) {
-    LOG_WARN("UpdateStmt: empty SET list");
-    return RC::INVALID_ARGUMENT;
-  }
+  vector<const FieldMeta *>               field_metas;
+  vector<std::unique_ptr<Expression>>    set_exprs;
 
   Table *table = db->find_table(table_name);
   if (table == nullptr) {
@@ -60,19 +57,42 @@ RC UpdateStmt::create(Db *db, UpdateSqlNode &update, Stmt *&stmt)
     return RC::SCHEMA_TABLE_NOT_EXIST;
   }
 
-  unordered_map<string, Table *> table_map;
-  table_map.emplace(string(table_name), table);
+  const TableMeta &table_meta = table->table_meta();
+  if (!update.updates.empty()) {
+    for (auto &p : update.updates) {
+      const char *field_name = p.first.c_str();
+      if (common::is_blank(field_name)) {
+        LOG_WARN("invalid blank field name");
+        return RC::INVALID_ARGUMENT;
+      }
 
-  BinderContext binder_context;
-  binder_context.add_table(table);
+      const FieldMeta *field_meta = table_meta.field(field_name);
+      if (field_meta == nullptr) {
+        LOG_WARN("no such field. table=%s, field=%s", table_name, field_name);
+        return RC::SCHEMA_FIELD_NOT_EXIST;
+      }
+      if (!field_meta->visible()) {
+        LOG_WARN("cannot update invisible(system) field. table=%s, field=%s", table_name, field_name);
+        return RC::INVALID_ARGUMENT;
+      }
 
-  for (auto &p : update.updates) {
-    const char *field_name = p.first.c_str();
+      Expression *expr = p.second.get();
+      if (expr == nullptr) {
+        LOG_WARN("update set expression is null. table=%s, field=%s", table_name, field_name);
+        return RC::INVALID_ARGUMENT;
+      }
+
+      field_metas.push_back(field_meta);
+      set_exprs.emplace_back(std::move(p.second)); // take ownership
+    }
+  } else {
+    // 兼容旧语法的兜底：直接用 ValueExpr 包装常量
+    const char *field_name = update.attribute_name.c_str();
     if (common::is_blank(field_name)) {
-      LOG_WARN("invalid blank field name");
+      LOG_WARN("invalid argument. field_name is blank");
       return RC::INVALID_ARGUMENT;
     }
-    const TableMeta &table_meta = table->table_meta();
+
     const FieldMeta *field_meta = table_meta.field(field_name);
     if (field_meta == nullptr) {
       LOG_WARN("no such field. table=%s, field=%s", table_name, field_name);
@@ -83,52 +103,12 @@ RC UpdateStmt::create(Db *db, UpdateSqlNode &update, Stmt *&stmt)
       return RC::INVALID_ARGUMENT;
     }
 
-    unique_ptr<Expression> expr = std::move(p.second);
-    if (expr == nullptr) {
-      LOG_WARN("null expression in SET");
-      return RC::INVALID_ARGUMENT;
-    }
-
-    ExpressionBinder binder(binder_context);
-    vector<unique_ptr<Expression>> bound;
-    rc = binder.bind_expression(expr, bound);
-    if (OB_FAIL(rc)) {
-      LOG_WARN("bind update expression failed. rc=%s", strrc(rc));
-      return rc;
-    }
-    if (bound.size() != 1) {
-      LOG_WARN("bind update expression: expected 1 bound expression");
-      return RC::INVALID_ARGUMENT;
-    }
-
-    rc = FilterStmt::prepare_subqueries_in_expression(bound[0].get(), db, &table_map);
-    if (OB_FAIL(rc)) {
-      LOG_WARN("prepare subqueries in update SET failed. rc=%s", strrc(rc));
-      return rc;
-    }
-
-    if (bound[0]->type() == ExprType::VALUE) {
-      ValueExpr *ve = static_cast<ValueExpr *>(bound[0].get());
-      Value v       = ve->get_value();
-      if (v.is_null()) {
-        if (!field_meta->nullable()) {
-          LOG_WARN("cannot set NULL on NOT NULL field. table=%s, field=%s", table_name, field_name);
-          return RC::INVALID_ARGUMENT;
-        }
-      } else if (field_meta->type() != v.attr_type()) {
-        Value casted;
-        rc = Value::cast_to(v, field_meta->type(), casted);
-        if (OB_FAIL(rc)) {
-          LOG_WARN("field type mismatch. table=%s, field=%s", table_name, field_name);
-          return RC::SCHEMA_FIELD_TYPE_MISMATCH;
-        }
-        bound[0] = make_unique<ValueExpr>(casted);
-      }
-    }
-
     field_metas.push_back(field_meta);
-    assignment_exprs.push_back(std::move(bound[0]));
+    set_exprs.emplace_back(std::make_unique<ValueExpr>(update.value));
   }
+
+  unordered_map<string, Table *> table_map;
+  table_map.emplace(string(table_name), table);
 
   FilterStmt *filter_stmt = nullptr;
   rc = FilterStmt::create(db,
@@ -142,6 +122,24 @@ RC UpdateStmt::create(Db *db, UpdateSqlNode &update, Stmt *&stmt)
     return rc;
   }
 
-  stmt = new UpdateStmt(table, std::move(field_metas), std::move(assignment_exprs), filter_stmt);
+  // 对 UPDATE SET 表达式做绑定（至少保证 RelAttr/子查询语义正确）
+  BinderContext binder_context;
+  binder_context.add_table(table);
+  ExpressionBinder expression_binder(binder_context);
+
+  vector<std::unique_ptr<Expression>> bound_set_exprs;
+  bound_set_exprs.reserve(set_exprs.size());
+  for (auto &expr_ptr : set_exprs) {
+    vector<std::unique_ptr<Expression>> bound;
+    unique_ptr<Expression> &expr_ref = expr_ptr;
+    rc = expression_binder.bind_expression(expr_ref, bound);
+    if (OB_FAIL(rc) || bound.size() != 1) {
+      LOG_WARN("failed to bind update set expression. rc=%s", strrc(rc));
+      return rc;
+    }
+    bound_set_exprs.emplace_back(std::move(bound[0]));
+  }
+
+  stmt = new UpdateStmt(table, std::move(field_metas), std::move(bound_set_exprs), filter_stmt);
   return RC::SUCCESS;
 }
