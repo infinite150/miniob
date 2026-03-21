@@ -14,11 +14,12 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
-#include "common/lang/string.h"
-#include "common/lang/vector.h"
-#include "common/lang/memory.h"
-#include "common/value.h"
-#include "common/lang/utility.h"
+// 使用尖括号，避免从 sql/parser/ 相对解析成 sql/parser/common/...（不存在），在部分环境下触发异常错误
+#include <common/lang/string.h>
+#include <common/lang/vector.h>
+#include <common/lang/memory.h>
+#include <common/value.h>
+#include <common/lang/utility.h>
 
 class Expression;
 
@@ -164,8 +165,11 @@ struct UpdateSqlNode
   string                   relation_name;   ///< Relation to update
   string                   attribute_name;  ///< 更新的字段（兼容单字段）
   Value                    value;           ///< 更新的值（兼容单字段）
-  vector<pair<string, Value>> updates;      ///< 多列更新：(字段名, 值) 列表，非空时优先使用
+  /// 多列更新：右侧为表达式树（含 ValueExpr / 子查询等），由解析器拥有直至 Stmt::create 接管
+  vector<pair<string, Expression *>> updates;
   vector<ConditionSqlNode> conditions;
+
+  ~UpdateSqlNode();
 };
 
 /**

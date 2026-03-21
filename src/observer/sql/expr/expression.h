@@ -730,4 +730,5 @@ private:
   mutable Trx *      trx_ = nullptr;
   SubQueryExpr *     parent_ = nullptr;  // 嵌套子查询时，内层使用父层的 parent_tuple
   bool               scalar_subquery_ = true;
+  mutable bool       opened_            = false;  ///< physical_oper_ 是否已 open（UPDATE 右值可能只 set_trx）
 };

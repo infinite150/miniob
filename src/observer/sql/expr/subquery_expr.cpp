@@ -154,11 +154,19 @@ RC SubQueryExpr::open(Trx *trx)
     LOG_WARN("subquery open with null trx");
     return RC::INVALID_ARGUMENT;
   }
-  return physical_oper_->open(trx);
+  if (opened_) {
+    return RC::SUCCESS;
+  }
+  RC rc = physical_oper_->open(trx);
+  if (rc == RC::SUCCESS) {
+    opened_ = true;
+  }
+  return rc;
 }
 
 RC SubQueryExpr::close()
 {
+  opened_ = false;
   if (physical_oper_ != nullptr) {
     return physical_oper_->close();
   }
@@ -205,6 +213,13 @@ RC SubQueryExpr::get_value(const Tuple &tuple, Value &value) const
 {
   if (physical_oper_ == nullptr) {
     return RC::INVALID_ARGUMENT;
+  }
+  // UPDATE SET / 投影等路径可能只 set_trx，未显式 open；无 opened_ 则 next() 会失败，NULL 无法传出。
+  if (trx_ != nullptr && !opened_) {
+    RC orc = const_cast<SubQueryExpr *>(this)->open(trx_);
+    if (orc != RC::SUCCESS) {
+      return orc;
+    }
   }
   const Tuple *pt = resolve_parent_tuple(tuple);
   physical_oper_->set_parent_tuple(pt);

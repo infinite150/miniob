@@ -52,7 +52,10 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
   Trx *trx = session->current_trx();
   trx->start_if_need();
 
+  Session *prev = Session::current_session();
+  Session::set_current_session(session);
   rc = physical_operator->open(trx);
+  Session::set_current_session(prev);
   if (OB_FAIL(rc)) {
     LOG_WARN("failed to open UPDATE operator. rc=%s", strrc(rc));
     physical_operator->close();

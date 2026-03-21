@@ -17,10 +17,12 @@ See the Mulan PSL v2 for more details. */
 #include "common/sys/rc.h"
 #include "sql/stmt/stmt.h"
 #include "common/lang/vector.h"
+#include "common/lang/memory.h"
 
 class Table;
 class FilterStmt;
 class FieldMeta;
+class Expression;
 
 /**
  * @brief 更新语句
@@ -30,26 +32,25 @@ class UpdateStmt : public Stmt
 {
 public:
   UpdateStmt() = default;
-  UpdateStmt(Table *table, vector<const FieldMeta *> field_metas, vector<Value> values, FilterStmt *filter_stmt);
+  UpdateStmt(Table *table, vector<const FieldMeta *> field_metas, vector<unique_ptr<Expression>> rhs_exprs, FilterStmt *filter_stmt);
   ~UpdateStmt() override;
 
   StmtType type() const override { return StmtType::UPDATE; }
 
 public:
-  static RC create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt);
+  static RC create(Db *db, UpdateSqlNode &update_sql, Stmt *&stmt);
 
 public:
   Table *table() const { return table_; }
-  const vector<const FieldMeta *> &field_metas() const { return field_metas_; }
-  const vector<Value>            &values() const { return values_; }
+  const vector<const FieldMeta *>      &field_metas() const { return field_metas_; }
+  vector<unique_ptr<Expression>>       &rhs_expressions() { return rhs_exprs_; }
+  const vector<unique_ptr<Expression>> &rhs_expressions() const { return rhs_exprs_; }
   const FieldMeta *field_meta() const { return field_metas_.empty() ? nullptr : field_metas_[0]; }
-  const Value     &value() const { return values_.empty() ? value_empty_ : values_[0]; }
   FilterStmt      *filter_stmt() const { return filter_stmt_; }
 
 private:
-  Table                    *table_        = nullptr;
-  vector<const FieldMeta *> field_metas_;
-  vector<Value>             values_;
-  Value                     value_empty_;  ///< 空占位，field_metas_ 为空时 value() 返回引用
-  FilterStmt               *filter_stmt_ = nullptr;
+  Table                         *table_        = nullptr;
+  vector<const FieldMeta *>      field_metas_;
+  vector<unique_ptr<Expression>> rhs_exprs_;
+  FilterStmt                    *filter_stmt_ = nullptr;
 };

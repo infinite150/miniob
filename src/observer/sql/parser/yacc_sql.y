@@ -171,7 +171,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
   char *                                     cstring;
   int                                        number;
   float                                      floats;
-  vector<std::pair<string, Value>> *         update_list;
+  vector<std::pair<string, Expression *>> *    update_assign_list;
   vector<vector<Value> *> *                   value_list_groups;
 }
 
@@ -217,7 +217,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
 %type <cstring>             storage_format
 %type <key_list>            primary_key
 %type <key_list>            attr_list
-%type <update_list>        update_list
+%type <update_assign_list>  update_list
 %type <value_list_groups>  value_list_groups
 %type <inner_join_node>     from_node
 %type <inner_join_list>     from_list
@@ -596,7 +596,10 @@ update_stmt:      /*  update 语句的语法解析树*/
       $$ = new ParsedSqlNode(SCF_UPDATE);
       $$->update.relation_name = $2;
       if ($4 != nullptr && !$4->empty()) {
-        $$->update.updates.swap(*$4);
+        for (auto &p : *$4) {
+          $$->update.updates.emplace_back(p.first, p.second);
+          p.second = nullptr;
+        }
         delete $4;
       }
       if ($5 != nullptr) {
@@ -607,17 +610,15 @@ update_stmt:      /*  update 语句的语法解析树*/
     ;
 
 update_list:
-    ID EQ value
+    ID EQ expression
     {
-      $$ = new vector<std::pair<string, Value>>();
-      $$->emplace_back($1, std::move(*$3));
-      delete $3;
+      $$ = new vector<std::pair<string, Expression *>>();
+      $$->emplace_back($1, $3);
     }
-    | update_list COMMA ID EQ value
+    | update_list COMMA ID EQ expression
     {
       $$ = $1;
-      $$->emplace_back($3, std::move(*$5));
-      delete $5;
+      $$->emplace_back($3, $5);
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/

@@ -18,6 +18,15 @@ See the Mulan PSL v2 for more details. */
 
 RC parse(char *st, ParsedSqlNode *sqln);
 
+UpdateSqlNode::~UpdateSqlNode()
+{
+  for (auto &p : updates) {
+    delete p.second;
+    p.second = nullptr;
+  }
+  updates.clear();
+}
+
 ParsedSqlNode::ParsedSqlNode() : flag(SCF_ERROR) {}
 
 ParsedSqlNode::ParsedSqlNode(SqlCommandFlag _flag) : flag(_flag) {}

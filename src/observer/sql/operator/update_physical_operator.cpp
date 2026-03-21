@@ -13,12 +13,17 @@ See the Mulan PSL v2 for more details. */
 #include <unordered_map>
 
 #include "common/log/log.h"
+#include "common/value.h"
+#include "session/session.h"
+#include "sql/expr/expression.h"
+#include "sql/expr/expression_iterator.h"
 #include "storage/table/table.h"
 #include "storage/trx/trx.h"
 #include "sql/expr/tuple.h"
 
-UpdatePhysicalOperator::UpdatePhysicalOperator(Table *table, const vector<const FieldMeta *> &field_metas, const vector<Value> &values)
-    : table_(table), field_metas_(field_metas), values_(values), trx_(nullptr)
+UpdatePhysicalOperator::UpdatePhysicalOperator(
+    Table *table, const vector<const FieldMeta *> &field_metas, vector<unique_ptr<Expression>> *rhs_exprs)
+    : table_(table), field_metas_(field_metas), rhs_exprs_(rhs_exprs), trx_(nullptr)
 {}
 
 RC UpdatePhysicalOperator::open(Trx *trx)
@@ -26,6 +31,20 @@ RC UpdatePhysicalOperator::open(Trx *trx)
   trx_ = trx;
   if (table_ != nullptr) {
     table_->add_ref();
+  }
+  Session *session = Session::current_session();
+  if (rhs_exprs_ != nullptr) {
+    for (auto &e : *rhs_exprs_) {
+      if (e) {
+        ExpressionIterator::for_each_subquery(*e, [session, trx](SubQueryExpr &sq) {
+          if (session != nullptr) {
+            (void)sq.generate_logical_oper();
+            (void)sq.generate_physical_oper(session);
+          }
+          sq.set_trx(trx);
+        });
+      }
+    }
   }
   if (children_.empty()) {
     LOG_WARN("UpdatePhysicalOperator::open has no child, table=%s", table_ ? table_->name() : "null");
@@ -38,7 +57,6 @@ RC UpdatePhysicalOperator::open(Trx *trx)
     return rc;
   }
 
-  // 与 DELETE 一致：在 open 中遍历子算子，收集待更新记录（拷贝数据避免 close 后悬空），再逐条 delete + insert
   vector<Record> old_records;
   while (OB_SUCC(rc = children_[0]->next())) {
     Tuple *tuple = children_[0]->current_tuple();
@@ -66,7 +84,7 @@ RC UpdatePhysicalOperator::open(Trx *trx)
     return rc;
   }
 
-  vector<Record> updated_new;  // 已成功更新的新记录，用于失败时回滚
+  vector<Record> updated_new;
   for (Record &old_record : old_records) {
     Record new_record;
     rc = build_new_record(old_record, new_record);
@@ -102,7 +120,6 @@ rollback:
       LOG_ERROR("rollback: failed to re-insert old record. rc=%s", strrc(rc2));
     }
   }
-  // 已 delete 但尚未 insert 成功的记录，需要重新 insert 回去
   for (size_t i = updated_new.size(); i < old_records.size(); i++) {
     RC rc2 = trx_->insert_record(table_, old_records[i]);
     if (OB_FAIL(rc2)) {
@@ -139,7 +156,8 @@ RC UpdatePhysicalOperator::tuple_schema(TupleSchema &schema) const
 
 RC UpdatePhysicalOperator::build_new_record(const Record &old_record, Record &new_record) const
 {
-  if (table_ == nullptr || field_metas_.empty()) {
+  if (table_ == nullptr || field_metas_.empty() || rhs_exprs_ == nullptr
+      || rhs_exprs_->size() != field_metas_.size()) {
     return RC::INTERNAL;
   }
 
@@ -147,9 +165,9 @@ RC UpdatePhysicalOperator::build_new_record(const Record &old_record, Record &ne
   const int        sys_fields = table_meta.sys_field_num();
   const int        user_fields = table_meta.field_num() - sys_fields;
 
-  unordered_map<string, const Value *> update_map;
-  for (size_t i = 0; i < field_metas_.size() && i < values_.size(); i++) {
-    update_map[field_metas_[i]->name()] = &values_[i];
+  unordered_map<string, const Expression *> update_map;
+  for (size_t i = 0; i < field_metas_.size(); i++) {
+    update_map[field_metas_[i]->name()] = (*rhs_exprs_)[i].get();
   }
 
   RowTuple tuple;
@@ -166,7 +184,26 @@ RC UpdatePhysicalOperator::build_new_record(const Record &old_record, Record &ne
     }
     auto it = update_map.find(field->name());
     if (it != update_map.end()) {
-      values.emplace_back(*it->second);
+      Value cell;
+      RC rc = it->second->get_value(tuple, cell);
+      if (OB_FAIL(rc)) {
+        return rc;
+      }
+      if (cell.is_null()) {
+        if (!field->nullable()) {
+          LOG_WARN("cannot set NULL on NOT NULL field. table=%s, field=%s", table_->name(), field->name());
+          return RC::INVALID_ARGUMENT;
+        }
+      } else if (field->type() != cell.attr_type()) {
+        Value casted;
+        rc = Value::cast_to(cell, field->type(), casted);
+        if (OB_FAIL(rc)) {
+          LOG_WARN("field type mismatch on update. table=%s, field=%s", table_->name(), field->name());
+          return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+        }
+        cell = std::move(casted);
+      }
+      values.emplace_back(std::move(cell));
     } else {
       Value cell;
       RC rc = tuple.cell_at(i + sys_fields, cell);

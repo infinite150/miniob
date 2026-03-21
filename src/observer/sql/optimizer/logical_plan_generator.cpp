@@ -366,7 +366,7 @@ RC LogicalPlanGenerator::create_plan(UpdateStmt *update_stmt, unique_ptr<Logical
   }
 
   unique_ptr<LogicalOperator> update_oper(
-      new UpdateLogicalOperator(table, update_stmt->field_metas(), update_stmt->values()));
+      new UpdateLogicalOperator(table, update_stmt->field_metas(), &update_stmt->rhs_expressions()));
 
   if (predicate_oper) {
     predicate_oper->add_child(std::move(table_get_oper));

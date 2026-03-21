@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "sql/operator/project_physical_operator.h"
 #include "common/log/log.h"
+#include "sql/expr/expression_iterator.h"
 #include "storage/record/record.h"
 #include "storage/table/table.h"
 
@@ -26,6 +27,10 @@ ProjectPhysicalOperator::ProjectPhysicalOperator(vector<unique_ptr<Expression>> 
 
 RC ProjectPhysicalOperator::open(Trx *trx)
 {
+  for (unique_ptr<Expression> &expr : expressions_) {
+    ExpressionIterator::for_each_subquery(*expr, [trx](SubQueryExpr &sq) { sq.set_trx(trx); });
+  }
+
   if (children_.empty()) {
     return RC::SUCCESS;
   }
