@@ -32,7 +32,11 @@ public:
   string name() const override { return "CALC"; }
   string param() const override { return ""; }
 
-  RC open(Trx *trx) override { return RC::SUCCESS; }
+  RC open(Trx *trx) override
+  {
+    emitted_ = false;
+    return RC::SUCCESS;
+  }
   RC next() override
   {
     RC rc = RC::SUCCESS;
@@ -52,7 +56,11 @@ public:
     }
     return RC::SUCCESS;
   }
-  RC close() override { return RC::SUCCESS; }
+  RC close() override
+  {
+    emitted_ = false;
+    return RC::SUCCESS;
+  }
 
   int cell_num() const { return tuple_.cell_num(); }
 

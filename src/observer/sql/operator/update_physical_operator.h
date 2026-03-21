@@ -16,6 +16,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/memory.h"
 
 class Trx;
+class Session;
 class FieldMeta;
 class Expression;
 
@@ -26,8 +27,8 @@ class Expression;
 class UpdatePhysicalOperator : public PhysicalOperator
 {
 public:
-  UpdatePhysicalOperator(
-      Table *table, const vector<const FieldMeta *> &field_metas, vector<unique_ptr<Expression>> *rhs_exprs);
+  UpdatePhysicalOperator(Table *table, const vector<const FieldMeta *> &field_metas,
+      vector<unique_ptr<Expression>> *rhs_exprs, Session *subquery_session = nullptr);
   virtual ~UpdatePhysicalOperator() = default;
 
   PhysicalOperatorType type() const override { return PhysicalOperatorType::UPDATE; }
@@ -49,5 +50,6 @@ private:
   Table                         *table_       = nullptr;
   vector<const FieldMeta *>      field_metas_;
   vector<unique_ptr<Expression>> *rhs_exprs_ = nullptr;
-  Trx                           *trx_         = nullptr;
+  Trx    *trx_                = nullptr;
+  Session *subquery_session_ = nullptr;
 };

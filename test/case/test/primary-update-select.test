@@ -1,0 +1,18 @@
+-- echo init
+CREATE TABLE upd_src(id int, v int);
+INSERT INTO upd_src VALUES (1, 100);
+CREATE TABLE upd_dst(id int, n int);
+INSERT INTO upd_dst VALUES (1, 0);
+INSERT INTO upd_dst VALUES (2, 0);
+INSERT INTO upd_dst VALUES (3, 0);
+
+-- echo multi-row UPDATE: SET from scalar subquery (same result per row)
+UPDATE upd_dst SET n=(SELECT upd_src.v FROM upd_src WHERE upd_src.id=1);
+-- sort SELECT id, n FROM upd_dst;
+
+-- echo aggregate scalar subquery in SET
+CREATE TABLE upd_cnt(id int);
+INSERT INTO upd_cnt VALUES (1);
+INSERT INTO upd_cnt VALUES (2);
+UPDATE upd_dst SET n=(SELECT COUNT(*) FROM upd_cnt) WHERE id<=2;
+-- sort SELECT id, n FROM upd_dst;

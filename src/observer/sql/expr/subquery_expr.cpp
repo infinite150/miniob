@@ -214,9 +214,22 @@ RC SubQueryExpr::get_value(const Tuple &tuple, Value &value) const
   if (physical_oper_ == nullptr) {
     return RC::INVALID_ARGUMENT;
   }
-  // UPDATE SET / 投影等路径可能只 set_trx，未显式 open；无 opened_ 则 next() 会失败，NULL 无法传出。
-  if (trx_ != nullptr && !opened_) {
-    RC orc = const_cast<SubQueryExpr *>(this)->open(trx_);
+  if (trx_ == nullptr) {
+    return RC::INVALID_ARGUMENT;
+  }
+  SubQueryExpr *self = const_cast<SubQueryExpr *>(this);
+  // 标量子查询：多行 UPDATE / 投影每行、相关子查询均需重新扫描，否则会沿用上次迭代器的 EOF
+  if (scalar_subquery_) {
+    RC crc = self->close();
+    if (crc != RC::SUCCESS) {
+      return crc;
+    }
+    RC orc = self->open(trx_);
+    if (orc != RC::SUCCESS) {
+      return orc;
+    }
+  } else if (!opened_) {
+    RC orc = self->open(trx_);
     if (orc != RC::SUCCESS) {
       return orc;
     }

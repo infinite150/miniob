@@ -1,0 +1,37 @@
+init
+CREATE TABLE upd_src(id int, v int);
+SUCCESS
+INSERT INTO upd_src VALUES (1, 100);
+SUCCESS
+CREATE TABLE upd_dst(id int, n int);
+SUCCESS
+INSERT INTO upd_dst VALUES (1, 0);
+SUCCESS
+INSERT INTO upd_dst VALUES (2, 0);
+SUCCESS
+INSERT INTO upd_dst VALUES (3, 0);
+SUCCESS
+
+multi-row UPDATE: SET from scalar subquery (same result per row)
+UPDATE upd_dst SET n=(SELECT upd_src.v FROM upd_src WHERE upd_src.id=1);
+SUCCESS
+SELECT id, n FROM upd_dst;
+1 | 100
+2 | 100
+3 | 100
+ID | N
+
+aggregate scalar subquery in SET
+CREATE TABLE upd_cnt(id int);
+SUCCESS
+INSERT INTO upd_cnt VALUES (1);
+SUCCESS
+INSERT INTO upd_cnt VALUES (2);
+SUCCESS
+UPDATE upd_dst SET n=(SELECT COUNT(*) FROM upd_cnt) WHERE id<=2;
+SUCCESS
+SELECT id, n FROM upd_dst;
+1 | 2
+2 | 2
+3 | 100
+ID | N

@@ -22,8 +22,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/expr/tuple.h"
 
 UpdatePhysicalOperator::UpdatePhysicalOperator(
-    Table *table, const vector<const FieldMeta *> &field_metas, vector<unique_ptr<Expression>> *rhs_exprs)
-    : table_(table), field_metas_(field_metas), rhs_exprs_(rhs_exprs), trx_(nullptr)
+    Table *table, const vector<const FieldMeta *> &field_metas, vector<unique_ptr<Expression>> *rhs_exprs, Session *subquery_session)
+    : table_(table), field_metas_(field_metas), rhs_exprs_(rhs_exprs), trx_(nullptr), subquery_session_(subquery_session)
 {}
 
 RC UpdatePhysicalOperator::open(Trx *trx)
@@ -32,17 +32,36 @@ RC UpdatePhysicalOperator::open(Trx *trx)
   if (table_ != nullptr) {
     table_->add_ref();
   }
-  Session *session = Session::current_session();
+  Session *session = subquery_session_ != nullptr ? subquery_session_ : Session::current_session();
   if (rhs_exprs_ != nullptr) {
     for (auto &e : *rhs_exprs_) {
       if (e) {
-        ExpressionIterator::for_each_subquery(*e, [session, trx](SubQueryExpr &sq) {
+        RC prep_rc = RC::SUCCESS;
+        ExpressionIterator::for_each_subquery(*e, [session, trx, &prep_rc](SubQueryExpr &sq) {
+          if (prep_rc != RC::SUCCESS) {
+            return;
+          }
           if (session != nullptr) {
-            (void)sq.generate_logical_oper();
-            (void)sq.generate_physical_oper(session);
+            RC rc = sq.generate_logical_oper();
+            if (OB_FAIL(rc)) {
+              prep_rc = rc;
+              return;
+            }
+            rc = sq.generate_physical_oper(session);
+            if (OB_FAIL(rc)) {
+              prep_rc = rc;
+              return;
+            }
           }
           sq.set_trx(trx);
         });
+        if (OB_FAIL(prep_rc)) {
+          LOG_WARN("UpdatePhysicalOperator: subquery plan generation failed. rc=%s", strrc(prep_rc));
+          if (table_ != nullptr) {
+            table_->release();
+          }
+          return prep_rc;
+        }
       }
     }
   }
