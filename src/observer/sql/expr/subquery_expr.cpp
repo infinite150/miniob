@@ -9,6 +9,7 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
 #include "sql/expr/expression.h"
+#include "sql/expr/tuple.h"
 #include "sql/expr/expression_iterator.h"
 #include "common/log/log.h"
 #include "sql/optimizer/logical_plan_generator.h"
@@ -172,6 +173,34 @@ bool SubQueryExpr::has_more_row(const Tuple &tuple) const
   physical_oper_->set_parent_tuple(pt);
   RC rc = physical_oper_->next();
   return rc == RC::SUCCESS;
+}
+
+RC SubQueryExpr::try_get_value(Value &value) const
+{
+  if (physical_oper_ == nullptr || trx_ == nullptr) {
+    return RC::UNIMPLEMENTED;
+  }
+  ValueListTuple dummy;
+  SubQueryExpr *self = const_cast<SubQueryExpr *>(this);
+  self->close();
+  RC rc = self->open(trx_);
+  if (rc != RC::SUCCESS) {
+    return rc;
+  }
+  rc = get_value(dummy, value);
+  if (rc == RC::RECORD_EOF) {
+    value.set_null();
+    rc = RC::SUCCESS;
+  } else if (rc != RC::SUCCESS) {
+    self->close();
+    return rc;
+  }
+  if (has_more_row(dummy)) {
+    self->close();
+    return RC::INVALID_ARGUMENT;
+  }
+  self->close();
+  return RC::SUCCESS;
 }
 
 RC SubQueryExpr::get_value(const Tuple &tuple, Value &value) const

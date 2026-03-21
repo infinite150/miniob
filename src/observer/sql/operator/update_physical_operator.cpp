@@ -16,11 +16,9 @@ See the Mulan PSL v2 for more details. */
 #include "storage/table/table.h"
 #include "storage/trx/trx.h"
 #include "sql/expr/tuple.h"
-#include "sql/expr/expression_iterator.h"
 
-UpdatePhysicalOperator::UpdatePhysicalOperator(Table *table, const vector<const FieldMeta *> &field_metas,
-    vector<std::unique_ptr<Expression>> &&set_exprs)
-    : table_(table), field_metas_(field_metas), set_exprs_(std::move(set_exprs)), trx_(nullptr)
+UpdatePhysicalOperator::UpdatePhysicalOperator(Table *table, const vector<const FieldMeta *> &field_metas, const vector<Value> &values)
+    : table_(table), field_metas_(field_metas), values_(values), trx_(nullptr)
 {}
 
 RC UpdatePhysicalOperator::open(Trx *trx)
@@ -149,9 +147,9 @@ RC UpdatePhysicalOperator::build_new_record(const Record &old_record, Record &ne
   const int        sys_fields = table_meta.sys_field_num();
   const int        user_fields = table_meta.field_num() - sys_fields;
 
-  unordered_map<string, const Expression *> update_map;
-  for (size_t i = 0; i < field_metas_.size() && i < set_exprs_.size(); i++) {
-    update_map[field_metas_[i]->name()] = set_exprs_[i].get();
+  unordered_map<string, const Value *> update_map;
+  for (size_t i = 0; i < field_metas_.size() && i < values_.size(); i++) {
+    update_map[field_metas_[i]->name()] = &values_[i];
   }
 
   RowTuple tuple;
@@ -168,31 +166,7 @@ RC UpdatePhysicalOperator::build_new_record(const Record &old_record, Record &ne
     }
     auto it = update_map.find(field->name());
     if (it != update_map.end()) {
-      const Expression &expr = *it->second;
-      Value              val;
-      RC                  erc = RC::SUCCESS;
-
-      // 标量子查询在 UPDATE SET 中需要显式 open/close，保证每次求值都从头开始执行。
-      vector<SubQueryExpr *> subqueries;
-      ExpressionIterator::for_each_subquery(const_cast<Expression &>(expr), [&subqueries](SubQueryExpr &sq) {
-        subqueries.push_back(&sq);
-      });
-      for (SubQueryExpr *sq : subqueries) {
-        erc = sq->open(trx_);
-        if (OB_FAIL(erc)) {
-          break;
-        }
-      }
-      if (OB_SUCC(erc)) {
-        erc = expr.get_value(tuple, val);
-      }
-      for (SubQueryExpr *sq : subqueries) {
-        (void)sq->close();
-      }
-      if (OB_FAIL(erc)) {
-        return erc;
-      }
-      values.emplace_back(std::move(val));
+      values.emplace_back(*it->second);
     } else {
       Value cell;
       RC rc = tuple.cell_at(i + sys_fields, cell);

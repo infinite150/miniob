@@ -699,7 +699,7 @@ public:
   Trx *  get_trx() const { return trx_; }
 
   RC get_value(const Tuple &tuple, Value &value) const override;
-  RC try_get_value(Value &value) const override { return RC::UNIMPLEMENTED; }
+  RC try_get_value(Value &value) const override;
 
   ExprType type() const override { return ExprType::SUBQUERY; }
   AttrType value_type() const override { return AttrType::UNDEFINED; }

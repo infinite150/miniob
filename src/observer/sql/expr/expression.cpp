@@ -155,6 +155,10 @@ CastExpr::~CastExpr() {}
 
 RC CastExpr::cast(const Value &value, Value &cast_value) const
 {
+  if (value.is_null()) {
+    cast_value.set_null();
+    return RC::SUCCESS;
+  }
   RC rc = RC::SUCCESS;
   if (this->value_type() == value.attr_type()) {
     cast_value = value;

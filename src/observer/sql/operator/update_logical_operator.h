@@ -16,10 +16,8 @@ See the Mulan PSL v2 for more details. */
 
 #include "sql/operator/logical_operator.h"
 #include "common/lang/vector.h"
-#include <memory>
 
 class FieldMeta;
-class Expression;
 
 /**
  * @brief 逻辑算子：更新（与 Insert/Delete 类似，持有表与更新目标；子节点为 TableGet 或 Predicate 提供待更新行）
@@ -28,8 +26,7 @@ class Expression;
 class UpdateLogicalOperator : public LogicalOperator
 {
 public:
-  UpdateLogicalOperator(Table *table, const vector<const FieldMeta *> &field_metas,
-      vector<std::unique_ptr<Expression>> &&set_exprs);
+  UpdateLogicalOperator(Table *table, const vector<const FieldMeta *> &field_metas, const vector<Value> &values);
   virtual ~UpdateLogicalOperator() = default;
 
   LogicalOperatorType type() const override { return LogicalOperatorType::UPDATE; }
@@ -37,12 +34,11 @@ public:
 
   Table                          *table() const { return table_; }
   const vector<const FieldMeta *> &field_metas() const { return field_metas_; }
-  const vector<std::unique_ptr<Expression>> &set_exprs() const { return set_exprs_; }
-  vector<std::unique_ptr<Expression>> &      set_exprs_mut() { return set_exprs_; }
+  const vector<Value>             &values() const { return values_; }
 
 private:
   Table                    *table_       = nullptr;
   vector<const FieldMeta *> field_metas_;
-  vector<std::unique_ptr<Expression>> set_exprs_;
+  vector<Value>             values_;
 };
 
