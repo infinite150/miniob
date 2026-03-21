@@ -176,7 +176,15 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
 }
 
 %destructor { if ($$) { for (auto *p : *$$) delete p; delete $$; } } <value_list_groups>
-%destructor { delete $$; } <update_list>
+/* 须与 %union 成员名一致：update_assign_list（非终结符名叫 update_list） */
+%destructor {
+  if ($$) {
+    for (auto &p : *$$) {
+      delete p.second;
+    }
+    delete $$;
+  }
+} <update_assign_list>
 %destructor { delete $$; } <condition>
 %destructor { delete $$; } <value>
 %destructor { delete $$; } <rel_attr>
