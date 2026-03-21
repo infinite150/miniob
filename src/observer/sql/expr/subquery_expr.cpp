@@ -146,6 +146,7 @@ void SubQueryExpr::bind_nested_subquery_parents()
 RC SubQueryExpr::open(Trx *trx)
 {
   trx_ = trx;
+  scalar_subquery_ = true;
   if (physical_oper_ == nullptr) {
     return RC::INVALID_ARGUMENT;
   }
@@ -195,10 +196,7 @@ RC SubQueryExpr::try_get_value(Value &value) const
     self->close();
     return rc;
   }
-  if (has_more_row(dummy)) {
-    self->close();
-    return RC::INVALID_ARGUMENT;
-  }
+  // 多行检测已在标量 get_value 内完成，避免重复 next()。
   self->close();
   return RC::SUCCESS;
 }
@@ -213,8 +211,9 @@ RC SubQueryExpr::get_value(const Tuple &tuple, Value &value) const
   RC rc = physical_oper_->next();
   if (rc != RC::SUCCESS) {
     if (rc == RC::RECORD_EOF) {
-      // Empty subquery: set value for API consistency; caller uses rc to detect
       value.set_null();
+      // 标量子查询：0 行 -> SUCCESS + NULL。IN/EXISTS 等置 scalar_subquery_=false，仍返回 RECORD_EOF。
+      return scalar_subquery_ ? RC::SUCCESS : RC::RECORD_EOF;
     }
     return rc;
   }
@@ -222,5 +221,15 @@ RC SubQueryExpr::get_value(const Tuple &tuple, Value &value) const
   if (row == nullptr) {
     return RC::INTERNAL;
   }
-  return row->cell_at(0, value);
+  RC cell_rc = row->cell_at(0, value);
+  if (cell_rc != RC::SUCCESS) {
+    return cell_rc;
+  }
+  // 标量子查询：多于 1 行必须失败；单行（含 cell 为 NULL）保持 SUCCESS + NULL，不因 is_null 失败。
+  if (scalar_subquery_) {
+    if (has_more_row(tuple)) {
+      return RC::INVALID_ARGUMENT;
+    }
+  }
+  return RC::SUCCESS;
 }

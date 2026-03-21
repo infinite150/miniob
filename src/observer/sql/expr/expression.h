@@ -715,6 +715,10 @@ public:
 
   void set_parent(SubQueryExpr *p) { parent_ = p; }
 
+  /// 标量子查询语义：0 行 -> NULL 且 RC::SUCCESS；IN/EXISTS 等需按行迭代时由 ComparisonExpr 置为 false。
+  void set_scalar_subquery(bool scalar) { scalar_subquery_ = scalar; }
+  bool is_scalar_subquery() const { return scalar_subquery_; }
+
 private:
   const Tuple *resolve_parent_tuple(const Tuple &tuple) const;
   void bind_nested_subquery_parents();
@@ -725,4 +729,5 @@ private:
   mutable unique_ptr<PhysicalOperator> physical_oper_;
   mutable Trx *      trx_ = nullptr;
   SubQueryExpr *     parent_ = nullptr;  // 嵌套子查询时，内层使用父层的 parent_tuple
+  bool               scalar_subquery_ = true;
 };

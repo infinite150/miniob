@@ -337,6 +337,7 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
       subquery->close();
       return rc;
     }
+    subquery->set_scalar_subquery(false);
     rc = right_->get_value(tuple, value);
     subquery->close();
     if (rc == RC::RECORD_EOF) {
@@ -372,6 +373,7 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
         subquery->close();
         return rc;
       }
+      subquery->set_scalar_subquery(false);
     } else {
       vlist->reset();
     }
@@ -418,10 +420,7 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
       left_value.set_null();
       rc = RC::SUCCESS;
     }
-    if (left_subquery->has_more_row(tuple)) {
-      left_subquery->close();
-      return RC::INVALID_ARGUMENT;  // 标量子查询返回多行，= 只能匹配单值，必须 FAILURE
-    }
+    // 标量多行：由 SubQueryExpr::get_value(scalar) 内检测，此处不再 has_more_row，避免重复 next()
     left_subquery->close();
   }
   if (rc != RC::SUCCESS) {
@@ -441,10 +440,6 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
     if (rc == RC::RECORD_EOF) {
       right_value.set_null();
       rc = RC::SUCCESS;
-    }
-    if (right_subquery->has_more_row(tuple)) {
-      right_subquery->close();
-      return RC::INVALID_ARGUMENT;  // 标量子查询返回多行，只能 0 或 1 行，必须 FAILURE
     }
     right_subquery->close();
   }
