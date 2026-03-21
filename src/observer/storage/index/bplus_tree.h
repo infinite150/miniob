@@ -140,6 +140,9 @@ public:
     return RID::compare(rid1, rid2);
   }
 
+  void set_unique(bool u) { unique_ = u; }
+  bool unique() const { return unique_; }
+
 private:
   AttrComparator attr_comparator_;
   bool           unique_ = false;
@@ -556,6 +559,8 @@ public:
    * @note 这里假设user_key的内存大小与attr_length 一致
    */
   RC insert_entry(const char *user_key, const RID *rid);
+  /// indexed_key_has_null：索引列含 SQL NULL 时须为 true，唯一索引允许多行 NULL（比较含 RID）
+  RC insert_entry(const char *user_key, const RID *rid, bool indexed_key_has_null);
 
   /**
    * @brief 从IndexHandle句柄对应的索引中删除一个值为（user_key，rid）的索引项
@@ -563,6 +568,7 @@ public:
    * @note 这里假设user_key的内存大小与attr_length 一致
    */
   RC delete_entry(const char *user_key, const RID *rid);
+  RC delete_entry(const char *user_key, const RID *rid, bool indexed_key_has_null);
 
   bool is_empty() const;
 

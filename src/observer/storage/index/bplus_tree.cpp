@@ -1600,6 +1600,32 @@ MemPoolItem::item_unique_ptr BplusTreeHandler::make_key(const char *user_key, co
 
 RC BplusTreeHandler::insert_entry(const char *user_key, const RID *rid)
 {
+  return insert_entry(user_key, rid, false);
+}
+
+namespace {
+struct RelaxUniqueComparatorForNullKey {
+  KeyComparator &kc;
+  bool           active = false;
+  RelaxUniqueComparatorForNullKey(KeyComparator &k, bool file_unique, bool indexed_key_has_null)
+      : kc(k)
+  {
+    if (file_unique && indexed_key_has_null) {
+      active = true;
+      kc.set_unique(false);
+    }
+  }
+  ~RelaxUniqueComparatorForNullKey()
+  {
+    if (active) {
+      kc.set_unique(true);
+    }
+  }
+};
+}  // namespace
+
+RC BplusTreeHandler::insert_entry(const char *user_key, const RID *rid, bool indexed_key_has_null)
+{
   if (user_key == nullptr || rid == nullptr) {
     LOG_WARN("Invalid arguments, key is empty or rid is empty");
     return RC::INVALID_ARGUMENT;
@@ -1616,6 +1642,8 @@ RC BplusTreeHandler::insert_entry(const char *user_key, const RID *rid)
   BplusTreeMiniTransaction mtr(*this, &rc);
 
   char *key = static_cast<char *>(pkey.get());
+
+  RelaxUniqueComparatorForNullKey relax_unique(key_comparator_, file_header_.unique != 0, indexed_key_has_null);
 
   if (is_empty()) {
     root_lock_.lock();
@@ -1887,6 +1915,11 @@ RC BplusTreeHandler::delete_entry_internal(BplusTreeMiniTransaction &mtr, Frame 
 
 RC BplusTreeHandler::delete_entry(const char *user_key, const RID *rid)
 {
+  return delete_entry(user_key, rid, false);
+}
+
+RC BplusTreeHandler::delete_entry(const char *user_key, const RID *rid, bool indexed_key_has_null)
+{
   MemPoolItem::item_unique_ptr pkey = mem_pool_item_->alloc_unique_ptr();
   if (nullptr == pkey) {
     LOG_WARN("Failed to alloc memory for key. size=%d", file_header_.key_length);
@@ -1902,6 +1935,8 @@ RC BplusTreeHandler::delete_entry(const char *user_key, const RID *rid)
   RC rc = RC::SUCCESS;
 
   BplusTreeMiniTransaction mtr(*this, &rc);
+
+  RelaxUniqueComparatorForNullKey relax_unique(key_comparator_, file_header_.unique != 0, indexed_key_has_null);
 
   Frame *leaf_frame = nullptr;
 

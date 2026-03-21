@@ -16,9 +16,33 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/span.h"
 #include "common/log/log.h"
 #include "storage/table/table.h"
+#include "storage/table/table_meta.h"
 #include "storage/db/db.h"
 
 BplusTreeIndex::~BplusTreeIndex() noexcept { close(); }
+
+/// 唯一索引：SQL NULL 不参与唯一性；索引列任一为 NULL 时须按 (key,RID) 区分
+static bool unique_index_key_contains_null(Table *table, const vector<FieldMeta> &idx_fields, const char *record)
+{
+  if (table == nullptr || record == nullptr || idx_fields.empty()) {
+    return false;
+  }
+  const TableMeta &tm    = table->table_meta();
+  const int        boff  = tm.null_bitmap_offset();
+  const auto      *bytes = reinterpret_cast<const unsigned char *>(record + boff);
+  for (const FieldMeta &fm : idx_fields) {
+    for (int j = 0; j < tm.field_num(); j++) {
+      const FieldMeta *f = tm.field(j);
+      if (f != nullptr && 0 == strcmp(f->name(), fm.name())) {
+        if (((bytes[j / 8] >> (j % 8)) & 1U) != 0) {
+          return true;
+        }
+        break;
+      }
+    }
+  }
+  return false;
+}
 
 RC BplusTreeIndex::create(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
 {
@@ -158,8 +182,10 @@ RC BplusTreeIndex::close()
 
 RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 {
+  const bool null_in_key =
+      index_meta_.unique() && unique_index_key_contains_null(table_, field_metas_, record);
   if (field_metas_.size() == 1) {
-    return index_handler_.insert_entry(record + field_metas_[0].offset(), rid);
+    return index_handler_.insert_entry(record + field_metas_[0].offset(), rid, null_in_key);
   }
   char key_buf[256];
   int  offset = 0;
@@ -171,13 +197,15 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
     memcpy(key_buf + offset, record + fm.offset(), fm.len());
     offset += fm.len();
   }
-  return index_handler_.insert_entry(key_buf, rid);
+  return index_handler_.insert_entry(key_buf, rid, null_in_key);
 }
 
 RC BplusTreeIndex::delete_entry(const char *record, const RID *rid)
 {
+  const bool null_in_key =
+      index_meta_.unique() && unique_index_key_contains_null(table_, field_metas_, record);
   if (field_metas_.size() == 1) {
-    return index_handler_.delete_entry(record + field_metas_[0].offset(), rid);
+    return index_handler_.delete_entry(record + field_metas_[0].offset(), rid, null_in_key);
   }
   char key_buf[256];
   int  offset = 0;
@@ -189,7 +217,7 @@ RC BplusTreeIndex::delete_entry(const char *record, const RID *rid)
     memcpy(key_buf + offset, record + fm.offset(), fm.len());
     offset += fm.len();
   }
-  return index_handler_.delete_entry(key_buf, rid);
+  return index_handler_.delete_entry(key_buf, rid, null_in_key);
 }
 
 IndexScanner *BplusTreeIndex::create_scanner(
