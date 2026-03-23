@@ -35,3 +35,43 @@ SELECT id, n FROM upd_dst;
 2 | 2
 3 | 100
 ID | N
+
+regression: sequence update/select should not duplicate rows after failed subquery update
+CREATE TABLE upd_seq(id int, n int);
+SUCCESS
+INSERT INTO upd_seq VALUES (1, 10);
+SUCCESS
+INSERT INTO upd_seq VALUES (2, 20);
+SUCCESS
+INSERT INTO upd_seq VALUES (2, 30);
+SUCCESS
+INSERT INTO upd_seq VALUES (3, 40);
+SUCCESS
+CREATE TABLE upd_seq_src(id int, v int);
+SUCCESS
+INSERT INTO upd_seq_src VALUES (1, 7);
+SUCCESS
+INSERT INTO upd_seq_src VALUES (1, 8);
+SUCCESS
+UPDATE upd_seq SET n=99 WHERE id=3;
+SUCCESS
+SELECT id, n FROM upd_seq;
+1 | 10
+2 | 20
+2 | 30
+3 | 99
+ID | N
+SELECT COUNT(*) FROM upd_seq;
+COUNT(*)
+4
+UPDATE upd_seq SET n=(SELECT v FROM upd_seq_src WHERE upd_seq_src.id=1) WHERE id=2;
+FAILURE
+SELECT id, n FROM upd_seq;
+1 | 10
+2 | 20
+2 | 30
+3 | 99
+ID | N
+SELECT COUNT(*) FROM upd_seq;
+COUNT(*)
+4

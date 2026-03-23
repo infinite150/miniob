@@ -104,6 +104,8 @@ RC UpdatePhysicalOperator::open(Trx *trx)
   }
 
   vector<Record> updated_new;
+  // 已成功 delete 旧记录的数量（用于失败回滚时避免对未删除行重复插入）
+  size_t         deleted_old_count = 0;
   for (Record &old_record : old_records) {
     Record new_record;
     rc = build_new_record(old_record, new_record);
@@ -116,6 +118,7 @@ RC UpdatePhysicalOperator::open(Trx *trx)
       LOG_WARN("failed to delete old record. rc=%s", strrc(rc));
       goto rollback;
     }
+    deleted_old_count++;
     rc = trx_->insert_record(table_, new_record);
     if (OB_FAIL(rc)) {
       LOG_WARN("failed to insert new record. rc=%s", strrc(rc));
@@ -139,7 +142,8 @@ rollback:
       LOG_ERROR("rollback: failed to re-insert old record. rc=%s", strrc(rc2));
     }
   }
-  for (size_t i = updated_new.size(); i < old_records.size(); i++) {
+  // 只恢复“已删除但尚未插入新行”的旧记录，未删除的旧记录不能重复插入。
+  for (size_t i = updated_new.size(); i < deleted_old_count; i++) {
     RC rc2 = trx_->insert_record(table_, old_records[i]);
     if (OB_FAIL(rc2)) {
       LOG_ERROR("rollback: failed to re-insert old record (deleted but not inserted). rc=%s", strrc(rc2));
