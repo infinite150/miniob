@@ -30,6 +30,17 @@ public:
   RC multiply(const Value &left, const Value &right, Value &result) const override;
   RC divide(const Value &left, const Value &right, Value &result) const override;
   RC negative(const Value &val, Value &result) const override;
+  RC cast_to(const Value &val, AttrType type, Value &result) const override;
+
+  int cast_cost(const AttrType type) override
+  {
+    if (type == AttrType::FLOATS) {
+      return 0;
+    } else if (type == AttrType::INTS) {
+      return 1;
+    }
+    return INT32_MAX;
+  }
 
   RC set_value_from_str(Value &val, const string &data) const override;
 

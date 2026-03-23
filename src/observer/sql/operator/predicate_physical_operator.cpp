@@ -53,8 +53,10 @@ RC PredicatePhysicalOperator::next()
 
     const Tuple *eval_tuple = tuple;
     if (parent_tuple_ != nullptr) {
-      combined_tuple_.set_left(const_cast<Tuple *>(parent_tuple_));
-      combined_tuple_.set_right(tuple);
+      // self-subquery UPDATE: inner/outer 来自同表时，未限定列应优先使用内层当前行，
+      // 避免谓词错误命中外层 tuple 导致子查询被误判为 0 行。
+      combined_tuple_.set_left(tuple);
+      combined_tuple_.set_right(const_cast<Tuple *>(parent_tuple_));
       eval_tuple = &combined_tuple_;
     }
 

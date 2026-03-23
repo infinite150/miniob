@@ -68,6 +68,20 @@ RC FloatType::negative(const Value &val, Value &result) const
   return RC::SUCCESS;
 }
 
+RC FloatType::cast_to(const Value &val, AttrType type, Value &result) const
+{
+  switch (type) {
+    case AttrType::INTS: {
+      result.set_int(static_cast<int>(val.get_float()));
+      return RC::SUCCESS;
+    }
+    default: {
+      LOG_WARN("unsupported type %d", type);
+      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    }
+  }
+}
+
 RC FloatType::set_value_from_str(Value &val, const string &data) const
 {
   RC                rc = RC::SUCCESS;

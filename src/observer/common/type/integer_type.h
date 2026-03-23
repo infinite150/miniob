@@ -38,6 +38,8 @@ public:
       return 0;
     } else if (type == AttrType::FLOATS) {
       return 1;
+    } else if (type == AttrType::CHARS) {
+      return 1;
     }
     return INT32_MAX;
   }
