@@ -72,7 +72,10 @@ RC UpdatePhysicalOperator::open(Trx *trx)
 
   RC rc = children_[0]->open(trx);
   if (OB_FAIL(rc)) {
-    LOG_WARN("UpdatePhysicalOperator: failed to open child. rc=%s", strrc(rc));
+    LOG_WARN("UpdatePhysicalOperator::open failed at children_[0]->open. rc=%s", strrc(rc));
+    if (table_ != nullptr) {
+      table_->release();
+    }
     return rc;
   }
 
@@ -80,7 +83,10 @@ RC UpdatePhysicalOperator::open(Trx *trx)
   while (OB_SUCC(rc = children_[0]->next())) {
     Tuple *tuple = children_[0]->current_tuple();
     if (tuple == nullptr) {
-      LOG_WARN("child current tuple is null");
+      LOG_WARN("UpdatePhysicalOperator::open failed at children_[0]->current_tuple, got null tuple");
+      if (table_ != nullptr) {
+        table_->release();
+      }
       return RC::INTERNAL;
     }
     RowTuple *row_tuple = static_cast<RowTuple *>(tuple);
@@ -110,18 +116,21 @@ RC UpdatePhysicalOperator::open(Trx *trx)
     Record new_record;
     rc = build_new_record(old_record, new_record);
     if (OB_FAIL(rc)) {
-      LOG_WARN("failed to build new record. rc=%s", strrc(rc));
+      LOG_WARN("UpdatePhysicalOperator::open failed at build_new_record. table=%s rid=%s rc=%s",
+          table_ ? table_->name() : "null", old_record.rid().to_string().c_str(), strrc(rc));
       goto rollback;
     }
     rc = trx_->delete_record(table_, old_record);
     if (OB_FAIL(rc)) {
-      LOG_WARN("failed to delete old record. rc=%s", strrc(rc));
+      LOG_WARN("UpdatePhysicalOperator::open failed at trx_->delete_record. table=%s rid=%s rc=%s",
+          table_ ? table_->name() : "null", old_record.rid().to_string().c_str(), strrc(rc));
       goto rollback;
     }
     deleted_old_count++;
     rc = trx_->insert_record(table_, new_record);
     if (OB_FAIL(rc)) {
-      LOG_WARN("failed to insert new record. rc=%s", strrc(rc));
+      LOG_WARN("UpdatePhysicalOperator::open failed at trx_->insert_record. table=%s old_rid=%s rc=%s",
+          table_ ? table_->name() : "null", old_record.rid().to_string().c_str(), strrc(rc));
       goto rollback;
     }
     updated_new.emplace_back();
@@ -136,6 +145,8 @@ rollback:
   // 由外层执行器在语句失败时统一调用 trx->rollback() 回溯。
   // 这里若再做手工补偿（delete+insert）会与事务回滚叠加，放大副作用。
   if (trx_ != nullptr && trx_->type() == TrxKit::Type::MVCC) {
+    LOG_WARN("UpdatePhysicalOperator::open rollback path in MVCC mode, defer recovery to outer trx->rollback. rc=%s",
+        strrc(rc));
     return rc;
   }
 
