@@ -75,3 +75,29 @@ ID | N
 SELECT COUNT(*) FROM upd_seq;
 COUNT(*)
 4
+
+regression: same-table scalar subquery UPDATE should read inner tuple values
+CREATE TABLE upd_self(id int, name char(10), c2 int);
+SUCCESS
+INSERT INTO upd_self VALUES (1, 'AAA', 1);
+SUCCESS
+INSERT INTO upd_self VALUES (2, 'BBB', 2);
+SUCCESS
+UPDATE upd_self SET c2=(SELECT c2 FROM upd_self WHERE id=1) WHERE id=2;
+SUCCESS
+SELECT id, c2 FROM upd_self;
+1 | 1
+2 | 1
+ID | C2
+UPDATE upd_self SET name=(SELECT name FROM upd_self WHERE id=1) WHERE id=2;
+SUCCESS
+SELECT id, name, c2 FROM upd_self;
+1 | AAA | 1
+2 | AAA | 1
+ID | NAME | C2
+UPDATE upd_self SET name=(SELECT name FROM upd_self WHERE id=1), c2=(SELECT c2 FROM upd_self WHERE id=1) WHERE id=2;
+SUCCESS
+SELECT id, name, c2 FROM upd_self;
+1 | AAA | 1
+2 | AAA | 1
+ID | NAME | C2

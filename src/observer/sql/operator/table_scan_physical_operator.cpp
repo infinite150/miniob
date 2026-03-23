@@ -97,8 +97,11 @@ RC TableScanPhysicalOperator::filter(RowTuple &tuple, bool &result)
   Value value;
   const Tuple *eval_tuple = &tuple;
   if (parent_tuple_ != nullptr) {
-    combined_tuple_.set_left(const_cast<Tuple *>(parent_tuple_));
-    combined_tuple_.set_right(&tuple);
+    // 子查询/相关子查询场景：当父层与子层来自同一张表且谓词使用了未限定列名时，
+    // JoinedTuple::find_cell 默认优先查 left_，会导致谓词错误地读取到父层字段。
+    // 这里将“扫描到的当前 tuple”放在 left_，从而让内层扫描结果优先匹配。
+    combined_tuple_.set_left(&tuple);
+    combined_tuple_.set_right(const_cast<Tuple *>(parent_tuple_));
     eval_tuple = &combined_tuple_;
   }
   for (unique_ptr<Expression> &expr : predicates_) {
