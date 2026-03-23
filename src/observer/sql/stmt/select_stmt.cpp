@@ -138,9 +138,10 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
 
   BinderContext binder_context;
 
-  // 相关子查询：将外层表加入 binder_context，以便解析 CSQ_1.FEAT1 等引用
+  // 相关子查询：外层表仅用于“带表名前缀”的解析（如 outer_t.id），
+  // 不参与未限定字段（如 id）的候选集合，避免与子查询 FROM 表产生歧义。
   for (const auto &p : parent_table_map) {
-    binder_context.add_table(p.second);
+    binder_context.add_table_alias(p.first.c_str(), p.second);
   }
 
   vector<Table *>                tables;

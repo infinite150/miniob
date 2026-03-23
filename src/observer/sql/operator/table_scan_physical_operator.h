@@ -76,7 +76,7 @@ private:
   Table                         *table_ = nullptr;
   Trx                           *trx_   = nullptr;
   ReadWriteMode                  mode_  = ReadWriteMode::READ_WRITE;
-  RecordScanner                 *record_scanner_;
+  RecordScanner                 *record_scanner_ = nullptr;
   Record                         current_record_;
   RowTuple                       tuple_;
   vector<unique_ptr<Expression>> predicates_;  // TODO chang predicate to table tuple filter
