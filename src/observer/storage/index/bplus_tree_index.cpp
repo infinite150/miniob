@@ -15,9 +15,11 @@ See the Mulan PSL v2 for more details. */
 #include "storage/index/bplus_tree_index.h"
 #include "common/lang/span.h"
 #include "common/log/log.h"
+#include "session/session.h"
 #include "storage/table/table.h"
 #include "storage/table/table_meta.h"
 #include "storage/db/db.h"
+#include "storage/trx/trx.h"
 
 BplusTreeIndex::~BplusTreeIndex() noexcept { close(); }
 
@@ -184,7 +186,58 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 {
   const bool null_in_key =
       index_meta_.unique() && unique_index_key_contains_null(table_, field_metas_, record);
+  RC rc = RC::SUCCESS;
   if (field_metas_.size() == 1) {
+    rc = index_handler_.insert_entry(record + field_metas_[0].offset(), rid, null_in_key);
+    if (rc != RC::RECORD_DUPLICATE_KEY || !index_meta_.unique() || null_in_key) {
+      return rc;
+    }
+
+    Session *session = Session::current_session();
+    Trx     *trx     = session != nullptr ? session->current_trx() : nullptr;
+    if (trx == nullptr || trx->type() != TrxKit::Type::MVCC || table_ == nullptr) {
+      return rc;
+    }
+
+    unique_ptr<IndexScanner> scanner(
+        create_scanner(record + field_metas_[0].offset(), field_metas_[0].len(), true,
+            record + field_metas_[0].offset(), field_metas_[0].len(), true));
+    if (scanner == nullptr) {
+      return rc;
+    }
+
+    bool        has_visible_conflict = false;
+    vector<RID> invisible_rids;
+    RID         dup_rid;
+    while (OB_SUCC(scanner->next_entry(&dup_rid))) {
+      Record dup_record;
+      RC     grc = table_->get_record(dup_rid, dup_record);
+      if (OB_FAIL(grc)) {
+        continue;
+      }
+
+      RC vrc = trx->visit_record(table_, dup_record, ReadWriteMode::READ_ONLY);
+      if (vrc == RC::SUCCESS) {
+        has_visible_conflict = true;
+        break;
+      }
+      if (vrc == RC::RECORD_INVISIBLE) {
+        invisible_rids.emplace_back(dup_rid);
+      }
+    }
+
+    if (has_visible_conflict) {
+      return rc;
+    }
+    scanner.reset();
+    for (const RID &invisible_rid : invisible_rids) {
+      // UPDATE(delete+insert) in MVCC may leave old version occupying unique key in index.
+      // If it's already invisible to current trx, remove that stale index entry and retry.
+      RC drc = index_handler_.delete_entry(record + field_metas_[0].offset(), &invisible_rid, false);
+      if (drc != RC::SUCCESS && drc != RC::RECORD_NOT_EXIST) {
+        return rc;
+      }
+    }
     return index_handler_.insert_entry(record + field_metas_[0].offset(), rid, null_in_key);
   }
   char key_buf[256];
@@ -196,6 +249,52 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
     }
     memcpy(key_buf + offset, record + fm.offset(), fm.len());
     offset += fm.len();
+  }
+  rc = index_handler_.insert_entry(key_buf, rid, null_in_key);
+  if (rc != RC::RECORD_DUPLICATE_KEY || !index_meta_.unique() || null_in_key) {
+    return rc;
+  }
+
+  Session *session = Session::current_session();
+  Trx     *trx     = session != nullptr ? session->current_trx() : nullptr;
+  if (trx == nullptr || trx->type() != TrxKit::Type::MVCC || table_ == nullptr) {
+    return rc;
+  }
+
+  unique_ptr<IndexScanner> scanner(create_scanner(key_buf, offset, true, key_buf, offset, true));
+  if (scanner == nullptr) {
+    return rc;
+  }
+
+  bool        has_visible_conflict = false;
+  vector<RID> invisible_rids;
+  RID         dup_rid;
+  while (OB_SUCC(scanner->next_entry(&dup_rid))) {
+    Record dup_record;
+    RC     grc = table_->get_record(dup_rid, dup_record);
+    if (OB_FAIL(grc)) {
+      continue;
+    }
+
+    RC vrc = trx->visit_record(table_, dup_record, ReadWriteMode::READ_ONLY);
+    if (vrc == RC::SUCCESS) {
+      has_visible_conflict = true;
+      break;
+    }
+    if (vrc == RC::RECORD_INVISIBLE) {
+      invisible_rids.emplace_back(dup_rid);
+    }
+  }
+
+  if (has_visible_conflict) {
+    return rc;
+  }
+  scanner.reset();
+  for (const RID &invisible_rid : invisible_rids) {
+    RC drc = index_handler_.delete_entry(key_buf, &invisible_rid, false);
+    if (drc != RC::SUCCESS && drc != RC::RECORD_NOT_EXIST) {
+      return rc;
+    }
   }
   return index_handler_.insert_entry(key_buf, rid, null_in_key);
 }
