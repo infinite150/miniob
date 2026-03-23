@@ -459,7 +459,7 @@ attr_def:
 opt_nullability:
     /* empty */
     {
-      $$ = 0; // default: NOT NULL
+      $$ = 1; // default: NULL
     }
     | NULL_T
     {
