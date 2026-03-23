@@ -15,11 +15,9 @@ See the Mulan PSL v2 for more details. */
 #include "storage/index/bplus_tree_index.h"
 #include "common/lang/span.h"
 #include "common/log/log.h"
-#include "session/session.h"
 #include "storage/table/table.h"
 #include "storage/table/table_meta.h"
 #include "storage/db/db.h"
-#include "storage/trx/trx.h"
 
 BplusTreeIndex::~BplusTreeIndex() noexcept { close(); }
 
@@ -44,6 +42,36 @@ static bool unique_index_key_contains_null(Table *table, const vector<FieldMeta>
     }
   }
   return false;
+}
+
+static bool extract_mvcc_trx_id_from_new_record(Table *table, const char *new_record, int32_t &trx_id)
+{
+  if (table == nullptr || new_record == nullptr) {
+    return false;
+  }
+  const auto trx_fields = table->table_meta().trx_fields();
+  if (trx_fields.size() < 2) {
+    return false;
+  }
+  const int32_t begin_xid = *reinterpret_cast<const int32_t *>(new_record + trx_fields[0].offset());
+  if (begin_xid >= 0) {
+    return false;
+  }
+  trx_id = -begin_xid;
+  return true;
+}
+
+static bool is_deleted_by_this_trx(Table *table, const Record &old_record, int32_t trx_id)
+{
+  if (table == nullptr || trx_id <= 0 || old_record.data() == nullptr) {
+    return false;
+  }
+  const auto trx_fields = table->table_meta().trx_fields();
+  if (trx_fields.size() < 2) {
+    return false;
+  }
+  const int32_t end_xid = *reinterpret_cast<const int32_t *>(old_record.data() + trx_fields[1].offset());
+  return end_xid == -trx_id;
 }
 
 RC BplusTreeIndex::create(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
@@ -193,9 +221,8 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
       return rc;
     }
 
-    Session *session = Session::current_session();
-    Trx     *trx     = session != nullptr ? session->current_trx() : nullptr;
-    if (trx == nullptr || trx->type() != TrxKit::Type::MVCC || table_ == nullptr) {
+    int32_t current_trx_id = 0;
+    if (!extract_mvcc_trx_id_from_new_record(table_, record, current_trx_id)) {
       return rc;
     }
 
@@ -206,7 +233,7 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
       return rc;
     }
 
-    bool        has_visible_conflict = false;
+    bool        has_conflict = false;
     vector<RID> invisible_rids;
     RID         dup_rid;
     while (OB_SUCC(scanner->next_entry(&dup_rid))) {
@@ -216,17 +243,17 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
         continue;
       }
 
-      RC vrc = trx->visit_record(table_, dup_record, ReadWriteMode::READ_ONLY);
-      if (vrc == RC::SUCCESS) {
-        has_visible_conflict = true;
-        break;
-      }
-      if (vrc == RC::RECORD_INVISIBLE) {
+      if (is_deleted_by_this_trx(table_, dup_record, current_trx_id)) {
         invisible_rids.emplace_back(dup_rid);
+      } else {
+        has_conflict = true;
+        break;
       }
     }
 
-    if (has_visible_conflict) {
+    if (has_conflict) {
+      LOG_WARN("unique index duplicate during mvcc update. index=%s table=%s rc=%s",
+          index_meta_.name(), table_ ? table_->name() : "null", strrc(rc));
       return rc;
     }
     scanner.reset();
@@ -255,9 +282,8 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
     return rc;
   }
 
-  Session *session = Session::current_session();
-  Trx     *trx     = session != nullptr ? session->current_trx() : nullptr;
-  if (trx == nullptr || trx->type() != TrxKit::Type::MVCC || table_ == nullptr) {
+  int32_t current_trx_id = 0;
+  if (!extract_mvcc_trx_id_from_new_record(table_, record, current_trx_id)) {
     return rc;
   }
 
@@ -266,7 +292,7 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
     return rc;
   }
 
-  bool        has_visible_conflict = false;
+  bool        has_conflict = false;
   vector<RID> invisible_rids;
   RID         dup_rid;
   while (OB_SUCC(scanner->next_entry(&dup_rid))) {
@@ -276,17 +302,17 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
       continue;
     }
 
-    RC vrc = trx->visit_record(table_, dup_record, ReadWriteMode::READ_ONLY);
-    if (vrc == RC::SUCCESS) {
-      has_visible_conflict = true;
-      break;
-    }
-    if (vrc == RC::RECORD_INVISIBLE) {
+    if (is_deleted_by_this_trx(table_, dup_record, current_trx_id)) {
       invisible_rids.emplace_back(dup_rid);
+    } else {
+      has_conflict = true;
+      break;
     }
   }
 
-  if (has_visible_conflict) {
+  if (has_conflict) {
+    LOG_WARN("unique index duplicate during mvcc update. index=%s table=%s rc=%s",
+        index_meta_.name(), table_ ? table_->name() : "null", strrc(rc));
     return rc;
   }
   scanner.reset();
