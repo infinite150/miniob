@@ -58,7 +58,8 @@ RC ExpressionIterator::iterate_child_expr(Expression &expr, function<RC(unique_p
 
       auto &arithmetic_expr = static_cast<ArithmeticExpr &>(expr);
       rc = callback(arithmetic_expr.left());
-      if (OB_SUCC(rc)) {
+      // 一元负号等运算无右子表达式，right() 为空指针，不可回调（否则回调内 expr-> 会崩溃）
+      if (OB_SUCC(rc) && arithmetic_expr.right()) {
         rc = callback(arithmetic_expr.right());
       }
     } break;

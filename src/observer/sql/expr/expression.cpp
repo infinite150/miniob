@@ -599,8 +599,13 @@ bool ArithmeticExpr::equal(const Expression &other) const
     return false;
   }
   auto &other_arith_expr = static_cast<const ArithmeticExpr &>(other);
-  return arithmetic_type_ == other_arith_expr.arithmetic_type() && left_->equal(*other_arith_expr.left_) &&
-         right_->equal(*other_arith_expr.right_);
+  if (arithmetic_type_ != other_arith_expr.arithmetic_type() || !left_->equal(*other_arith_expr.left_)) {
+    return false;
+  }
+  if (static_cast<bool>(right_) != static_cast<bool>(other_arith_expr.right_)) {
+    return false;
+  }
+  return !right_ || right_->equal(*other_arith_expr.right_);
 }
 AttrType ArithmeticExpr::value_type() const
 {
@@ -620,6 +625,18 @@ AttrType ArithmeticExpr::value_type() const
 RC ArithmeticExpr::calc_value(const Value &left_value, const Value &right_value, Value &value) const
 {
   RC rc = RC::SUCCESS;
+
+  if (arithmetic_type_ == Type::NEGATIVE) {
+    if (value_is_null(left_value)) {
+      value.set_null();
+      return RC::SUCCESS;
+    }
+  } else {
+    if (value_is_null(left_value) || value_is_null(right_value)) {
+      value.set_null();
+      return RC::SUCCESS;
+    }
+  }
 
   const AttrType target_type = value_type();
   value.set_type(target_type);
@@ -733,6 +750,11 @@ RC ArithmeticExpr::get_value(const Tuple &tuple, Value &value) const
     LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
     return rc;
   }
+
+  if (arithmetic_type_ == Type::NEGATIVE) {
+    return calc_value(left_value, right_value, value);
+  }
+
   rc = right_->get_value(tuple, right_value);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
@@ -749,13 +771,18 @@ RC ArithmeticExpr::get_column(Chunk &chunk, Column &column)
     return rc;
   }
   Column left_column;
-  Column right_column;
 
   rc = left_->get_column(chunk, left_column);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get column of left expression. rc=%s", strrc(rc));
     return rc;
   }
+
+  if (arithmetic_type_ == Type::NEGATIVE || !right_) {
+    return calc_column(left_column, left_column, column);
+  }
+
+  Column right_column;
   rc = right_->get_column(chunk, right_column);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get column of right expression. rc=%s", strrc(rc));
@@ -801,12 +828,19 @@ RC ArithmeticExpr::try_get_value(Value &value) const
     return rc;
   }
 
-  if (right_) {
-    rc = right_->try_get_value(right_value);
-    if (rc != RC::SUCCESS) {
-      LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
-      return rc;
-    }
+  if (arithmetic_type_ == Type::NEGATIVE) {
+    return calc_value(left_value, right_value, value);
+  }
+
+  if (!right_) {
+    LOG_WARN("binary arithmetic missing right operand");
+    return RC::INVALID_ARGUMENT;
+  }
+
+  rc = right_->try_get_value(right_value);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
+    return rc;
   }
 
   return calc_value(left_value, right_value, value);
