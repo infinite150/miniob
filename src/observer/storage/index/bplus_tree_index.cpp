@@ -63,7 +63,7 @@ static bool extract_mvcc_trx_id_from_new_record(Table *table, const char *new_re
   return true;
 }
 
-static bool is_deleted_by_this_trx(Table *table, const Record &old_record, int32_t trx_id)
+static bool is_deleted_by_specific_trx(Table *table, const Record &old_record, int32_t trx_id)
 {
   if (table == nullptr || trx_id <= 0 || old_record.data() == nullptr) {
     return false;
@@ -87,13 +87,13 @@ static bool resolve_session_mvcc_trx_id(int32_t &trx_id)
   return false;
 }
 
-/// 唯一键冲突消解需要当前事务号：优先从新行 begin_xid 解析；失败时用 Session 上的 MVCC 事务（多连接脚本场景）。
+/// 唯一键冲突消解的主事务号：优先当前 Session 的 MVCC trx；拿不到时再从新行 begin_xid 解析。
 static bool resolve_trx_id_for_mvcc_dup_fixup(Table *table, const char *new_record, int32_t &trx_id)
 {
-  if (extract_mvcc_trx_id_from_new_record(table, new_record, trx_id)) {
+  if (resolve_session_mvcc_trx_id(trx_id)) {
     return true;
   }
-  return resolve_session_mvcc_trx_id(trx_id);
+  return extract_mvcc_trx_id_from_new_record(table, new_record, trx_id);
 }
 
 /// 唯一键冲突扫描：若 end_xid 与 trx_id 对不齐，仍用 MVCC 可见性（与旧 Session+visit_record 行为一致）判断是否可清理占位。
@@ -102,18 +102,7 @@ static void classify_mvcc_unique_dup_entry(
 {
   is_stale_placeholder = false;
   is_real_conflict     = false;
-  if (is_deleted_by_this_trx(table, dup_record, trx_id)) {
-    is_stale_placeholder = true;
-    return;
-  }
-
-  // UPDATE(delete+insert) in MVCC relies on recognizing the old version that was
-  // just deleted by the current transaction. If the trx id resolved from the new
-  // record does not line up, retry with the current session trx id before falling
-  // back to the broader MVCC visibility check.
-  int32_t session_trx_id = 0;
-  if (resolve_session_mvcc_trx_id(session_trx_id) && session_trx_id != trx_id
-      && is_deleted_by_this_trx(table, dup_record, session_trx_id)) {
+  if (is_deleted_by_specific_trx(table, dup_record, trx_id)) {
     is_stale_placeholder = true;
     return;
   }
@@ -283,8 +272,10 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
       return rc;
     }
 
-    int32_t current_trx_id = 0;
-    if (!resolve_trx_id_for_mvcc_dup_fixup(table_, record, current_trx_id)) {
+    int32_t session_trx_id = 0;
+    const bool have_session_mvcc_trx = resolve_session_mvcc_trx_id(session_trx_id);
+    int32_t    fixup_trx_id        = 0;
+    if (!resolve_trx_id_for_mvcc_dup_fixup(table_, record, fixup_trx_id)) {
       return rc;
     }
 
@@ -307,7 +298,11 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 
       bool stale = false;
       bool real_conflict = false;
-      classify_mvcc_unique_dup_entry(table_, dup_record, current_trx_id, stale, real_conflict);
+      if (have_session_mvcc_trx && is_deleted_by_specific_trx(table_, dup_record, session_trx_id)) {
+        stale = true;
+      } else {
+        classify_mvcc_unique_dup_entry(table_, dup_record, fixup_trx_id, stale, real_conflict);
+      }
       if (real_conflict) {
         has_conflict = true;
         break;
@@ -348,8 +343,10 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
     return rc;
   }
 
-  int32_t current_trx_id = 0;
-  if (!resolve_trx_id_for_mvcc_dup_fixup(table_, record, current_trx_id)) {
+  int32_t session_trx_id = 0;
+  const bool have_session_mvcc_trx = resolve_session_mvcc_trx_id(session_trx_id);
+  int32_t    fixup_trx_id        = 0;
+  if (!resolve_trx_id_for_mvcc_dup_fixup(table_, record, fixup_trx_id)) {
     return rc;
   }
 
@@ -370,7 +367,11 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 
     bool stale = false;
     bool real_conflict = false;
-    classify_mvcc_unique_dup_entry(table_, dup_record, current_trx_id, stale, real_conflict);
+    if (have_session_mvcc_trx && is_deleted_by_specific_trx(table_, dup_record, session_trx_id)) {
+      stale = true;
+    } else {
+      classify_mvcc_unique_dup_entry(table_, dup_record, fixup_trx_id, stale, real_conflict);
+    }
     if (real_conflict) {
       has_conflict = true;
       break;
