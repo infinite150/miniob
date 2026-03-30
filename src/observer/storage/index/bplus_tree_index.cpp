@@ -76,12 +76,8 @@ static bool is_deleted_by_this_trx(Table *table, const Record &old_record, int32
   return end_xid == -trx_id;
 }
 
-/// 唯一键冲突消解需要当前事务号：优先从新行 begin_xid 解析；失败时用 Session 上的 MVCC 事务（多连接脚本场景）。
-static bool resolve_trx_id_for_mvcc_dup_fixup(Table *table, const char *new_record, int32_t &trx_id)
+static bool resolve_session_mvcc_trx_id(int32_t &trx_id)
 {
-  if (extract_mvcc_trx_id_from_new_record(table, new_record, trx_id)) {
-    return true;
-  }
   Session *session = Session::current_session();
   Trx     *trx     = session != nullptr ? session->current_trx() : nullptr;
   if (trx != nullptr && trx->type() == TrxKit::Type::MVCC) {
@@ -89,6 +85,15 @@ static bool resolve_trx_id_for_mvcc_dup_fixup(Table *table, const char *new_reco
     return true;
   }
   return false;
+}
+
+/// 唯一键冲突消解需要当前事务号：优先从新行 begin_xid 解析；失败时用 Session 上的 MVCC 事务（多连接脚本场景）。
+static bool resolve_trx_id_for_mvcc_dup_fixup(Table *table, const char *new_record, int32_t &trx_id)
+{
+  if (extract_mvcc_trx_id_from_new_record(table, new_record, trx_id)) {
+    return true;
+  }
+  return resolve_session_mvcc_trx_id(trx_id);
 }
 
 /// 唯一键冲突扫描：若 end_xid 与 trx_id 对不齐，仍用 MVCC 可见性（与旧 Session+visit_record 行为一致）判断是否可清理占位。
@@ -101,6 +106,18 @@ static void classify_mvcc_unique_dup_entry(
     is_stale_placeholder = true;
     return;
   }
+
+  // UPDATE(delete+insert) in MVCC relies on recognizing the old version that was
+  // just deleted by the current transaction. If the trx id resolved from the new
+  // record does not line up, retry with the current session trx id before falling
+  // back to the broader MVCC visibility check.
+  int32_t session_trx_id = 0;
+  if (resolve_session_mvcc_trx_id(session_trx_id) && session_trx_id != trx_id
+      && is_deleted_by_this_trx(table, dup_record, session_trx_id)) {
+    is_stale_placeholder = true;
+    return;
+  }
+
   Session *session = Session::current_session();
   Trx     *trx     = session != nullptr ? session->current_trx() : nullptr;
   if (trx != nullptr && trx->type() == TrxKit::Type::MVCC) {
