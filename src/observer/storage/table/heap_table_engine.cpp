@@ -58,8 +58,9 @@ RC HeapTableEngine::insert_record(Record &record)
     }
     RC rc2 = record_handler_->delete_record(&record.rid());
     if (rc2 != RC::SUCCESS) {
-      LOG_PANIC("Failed to rollback record data when insert index entries failed. table name=%s, rc=%d:%s",
-                table_meta_->name(), rc2, strrc(rc2));
+      LOG_ERROR("Failed to rollback record data when insert index entries failed. table name=%s, rc=%s",
+          table_meta_->name(), strrc(rc2));
+      return rc2;
     }
   }
   return rc;
