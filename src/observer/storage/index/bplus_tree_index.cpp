@@ -91,6 +91,34 @@ static bool resolve_trx_id_for_mvcc_dup_fixup(Table *table, const char *new_reco
   return false;
 }
 
+/// 唯一键冲突扫描：若 end_xid 与 trx_id 对不齐，仍用 MVCC 可见性（与旧 Session+visit_record 行为一致）判断是否可清理占位。
+static void classify_mvcc_unique_dup_entry(
+    Table *table, Record &dup_record, int32_t trx_id, bool &is_stale_placeholder, bool &is_real_conflict)
+{
+  is_stale_placeholder = false;
+  is_real_conflict     = false;
+  if (is_deleted_by_this_trx(table, dup_record, trx_id)) {
+    is_stale_placeholder = true;
+    return;
+  }
+  Session *session = Session::current_session();
+  Trx     *trx     = session != nullptr ? session->current_trx() : nullptr;
+  if (trx != nullptr && trx->type() == TrxKit::Type::MVCC) {
+    RC vrc = trx->visit_record(table, dup_record, ReadWriteMode::READ_ONLY);
+    if (vrc == RC::RECORD_INVISIBLE) {
+      is_stale_placeholder = true;
+      return;
+    }
+    if (vrc == RC::SUCCESS) {
+      is_real_conflict = true;
+      return;
+    }
+    is_real_conflict = true;
+    return;
+  }
+  is_real_conflict = true;
+}
+
 RC BplusTreeIndex::create(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
 {
   if (inited_) {
@@ -260,11 +288,15 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
         continue;
       }
 
-      if (is_deleted_by_this_trx(table_, dup_record, current_trx_id)) {
-        invisible_rids.emplace_back(dup_rid);
-      } else {
+      bool stale = false;
+      bool real_conflict = false;
+      classify_mvcc_unique_dup_entry(table_, dup_record, current_trx_id, stale, real_conflict);
+      if (real_conflict) {
         has_conflict = true;
         break;
+      }
+      if (stale) {
+        invisible_rids.emplace_back(dup_rid);
       }
     }
 
@@ -319,11 +351,15 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
       continue;
     }
 
-    if (is_deleted_by_this_trx(table_, dup_record, current_trx_id)) {
-      invisible_rids.emplace_back(dup_rid);
-    } else {
+    bool stale = false;
+    bool real_conflict = false;
+    classify_mvcc_unique_dup_entry(table_, dup_record, current_trx_id, stale, real_conflict);
+    if (real_conflict) {
       has_conflict = true;
       break;
+    }
+    if (stale) {
+      invisible_rids.emplace_back(dup_rid);
     }
   }
 

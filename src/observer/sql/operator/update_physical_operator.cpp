@@ -57,9 +57,7 @@ RC UpdatePhysicalOperator::open(Trx *trx)
         });
         if (OB_FAIL(prep_rc)) {
           LOG_WARN("UpdatePhysicalOperator: subquery plan generation failed. rc=%s", strrc(prep_rc));
-          if (table_ != nullptr) {
-            table_->release();
-          }
+          // 仅由 add_ref 对称：失败时 SqlResult 仍会 close()，此处不得 release，避免双重 release
           return prep_rc;
         }
       }
@@ -73,9 +71,6 @@ RC UpdatePhysicalOperator::open(Trx *trx)
   RC rc = children_[0]->open(trx);
   if (OB_FAIL(rc)) {
     LOG_WARN("UpdatePhysicalOperator::open failed at children_[0]->open. rc=%s", strrc(rc));
-    if (table_ != nullptr) {
-      table_->release();
-    }
     return rc;
   }
 
@@ -84,9 +79,6 @@ RC UpdatePhysicalOperator::open(Trx *trx)
     Tuple *tuple = children_[0]->current_tuple();
     if (tuple == nullptr) {
       LOG_WARN("UpdatePhysicalOperator::open failed at children_[0]->current_tuple, got null tuple");
-      if (table_ != nullptr) {
-        table_->release();
-      }
       return RC::INTERNAL;
     }
     RowTuple *row_tuple = static_cast<RowTuple *>(tuple);
