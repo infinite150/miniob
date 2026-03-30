@@ -87,15 +87,6 @@ static bool resolve_session_mvcc_trx_id(int32_t &trx_id)
   return false;
 }
 
-/// 唯一键冲突消解的主事务号：优先当前 Session 的 MVCC trx；拿不到时再从新行 begin_xid 解析。
-static bool resolve_trx_id_for_mvcc_dup_fixup(Table *table, const char *new_record, int32_t &trx_id)
-{
-  if (resolve_session_mvcc_trx_id(trx_id)) {
-    return true;
-  }
-  return extract_mvcc_trx_id_from_new_record(table, new_record, trx_id);
-}
-
 /// 唯一键冲突扫描：若 end_xid 与 trx_id 对不齐，仍用 MVCC 可见性（与旧 Session+visit_record 行为一致）判断是否可清理占位。
 static void classify_mvcc_unique_dup_entry(
     Table *table, Record &dup_record, int32_t trx_id, bool &is_stale_placeholder, bool &is_real_conflict)
@@ -274,10 +265,12 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 
     int32_t session_trx_id = 0;
     const bool have_session_mvcc_trx = resolve_session_mvcc_trx_id(session_trx_id);
-    int32_t    fixup_trx_id        = 0;
-    if (!resolve_trx_id_for_mvcc_dup_fixup(table_, record, fixup_trx_id)) {
+    int32_t    record_trx_id        = 0;
+    const bool have_record_trx = extract_mvcc_trx_id_from_new_record(table_, record, record_trx_id);
+    if (!have_session_mvcc_trx && !have_record_trx) {
       return rc;
     }
+    const int32_t classify_trx_id = have_record_trx ? record_trx_id : session_trx_id;
 
     unique_ptr<IndexScanner> scanner(
         create_scanner(record + field_metas_[0].offset(), field_metas_[0].len(), true,
@@ -301,7 +294,7 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
       if (have_session_mvcc_trx && is_deleted_by_specific_trx(table_, dup_record, session_trx_id)) {
         stale = true;
       } else {
-        classify_mvcc_unique_dup_entry(table_, dup_record, fixup_trx_id, stale, real_conflict);
+        classify_mvcc_unique_dup_entry(table_, dup_record, classify_trx_id, stale, real_conflict);
       }
       if (real_conflict) {
         has_conflict = true;
@@ -317,10 +310,11 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
           index_meta_.name(), table_ ? table_->name() : "null", strrc(rc));
       return rc;
     }
+    if (invisible_rids.empty()) {
+      return rc;
+    }
     scanner.reset();
     for (const RID &invisible_rid : invisible_rids) {
-      // UPDATE(delete+insert) in MVCC may leave old version occupying unique key in index.
-      // If it's already invisible to current trx, remove that stale index entry and retry.
       RC drc = index_handler_.delete_entry(record + field_metas_[0].offset(), &invisible_rid, false);
       if (drc != RC::SUCCESS && drc != RC::RECORD_NOT_EXIST) {
         return rc;
@@ -345,10 +339,12 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 
   int32_t session_trx_id = 0;
   const bool have_session_mvcc_trx = resolve_session_mvcc_trx_id(session_trx_id);
-  int32_t    fixup_trx_id        = 0;
-  if (!resolve_trx_id_for_mvcc_dup_fixup(table_, record, fixup_trx_id)) {
+  int32_t    record_trx_id        = 0;
+  const bool have_record_trx = extract_mvcc_trx_id_from_new_record(table_, record, record_trx_id);
+  if (!have_session_mvcc_trx && !have_record_trx) {
     return rc;
   }
+  const int32_t classify_trx_id = have_record_trx ? record_trx_id : session_trx_id;
 
   unique_ptr<IndexScanner> scanner(create_scanner(key_buf, offset, true, key_buf, offset, true));
   if (scanner == nullptr) {
@@ -370,7 +366,7 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
     if (have_session_mvcc_trx && is_deleted_by_specific_trx(table_, dup_record, session_trx_id)) {
       stale = true;
     } else {
-      classify_mvcc_unique_dup_entry(table_, dup_record, fixup_trx_id, stale, real_conflict);
+      classify_mvcc_unique_dup_entry(table_, dup_record, classify_trx_id, stale, real_conflict);
     }
     if (real_conflict) {
       has_conflict = true;
@@ -384,6 +380,9 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
   if (has_conflict) {
     LOG_WARN("unique index duplicate during mvcc update. index=%s table=%s rc=%s",
         index_meta_.name(), table_ ? table_->name() : "null", strrc(rc));
+    return rc;
+  }
+  if (invisible_rids.empty()) {
     return rc;
   }
   scanner.reset();
