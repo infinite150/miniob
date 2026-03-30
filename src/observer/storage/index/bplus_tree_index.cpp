@@ -15,9 +15,11 @@ See the Mulan PSL v2 for more details. */
 #include "storage/index/bplus_tree_index.h"
 #include "common/lang/span.h"
 #include "common/log/log.h"
+#include "session/session.h"
 #include "storage/table/table.h"
 #include "storage/table/table_meta.h"
 #include "storage/db/db.h"
+#include "storage/trx/trx.h"
 
 BplusTreeIndex::~BplusTreeIndex() noexcept { close(); }
 
@@ -72,6 +74,21 @@ static bool is_deleted_by_this_trx(Table *table, const Record &old_record, int32
   }
   const int32_t end_xid = *reinterpret_cast<const int32_t *>(old_record.data() + trx_fields[1].offset());
   return end_xid == -trx_id;
+}
+
+/// 唯一键冲突消解需要当前事务号：优先从新行 begin_xid 解析；失败时用 Session 上的 MVCC 事务（多连接脚本场景）。
+static bool resolve_trx_id_for_mvcc_dup_fixup(Table *table, const char *new_record, int32_t &trx_id)
+{
+  if (extract_mvcc_trx_id_from_new_record(table, new_record, trx_id)) {
+    return true;
+  }
+  Session *session = Session::current_session();
+  Trx     *trx     = session != nullptr ? session->current_trx() : nullptr;
+  if (trx != nullptr && trx->type() == TrxKit::Type::MVCC) {
+    trx_id = trx->id();
+    return true;
+  }
+  return false;
 }
 
 RC BplusTreeIndex::create(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
@@ -222,7 +239,7 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
     }
 
     int32_t current_trx_id = 0;
-    if (!extract_mvcc_trx_id_from_new_record(table_, record, current_trx_id)) {
+    if (!resolve_trx_id_for_mvcc_dup_fixup(table_, record, current_trx_id)) {
       return rc;
     }
 
@@ -283,7 +300,7 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
   }
 
   int32_t current_trx_id = 0;
-  if (!extract_mvcc_trx_id_from_new_record(table_, record, current_trx_id)) {
+  if (!resolve_trx_id_for_mvcc_dup_fixup(table_, record, current_trx_id)) {
     return rc;
   }
 

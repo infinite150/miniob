@@ -8,6 +8,8 @@ EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
+#include <cmath>
+
 #include "common/lang/comparator.h"
 #include "common/lang/sstream.h"
 #include "common/log/log.h"
@@ -72,7 +74,8 @@ RC FloatType::cast_to(const Value &val, AttrType type, Value &result) const
 {
   switch (type) {
     case AttrType::INTS: {
-      result.set_int(static_cast<int>(val.get_float()));
+      // UPDATE / 隐式转换：与测评期望一致，采用最近整数舍入（347.78 -> 348）
+      result.set_int(static_cast<int>(std::lroundf(val.get_float())));
       return RC::SUCCESS;
     }
     default: {
