@@ -24,6 +24,12 @@ class Db;
 class Table;
 class FieldMeta;
 
+/**
+ * 遍历表达式树，对每个 SubQueryExpr 调用 generate_select_stmt。
+ * 必须覆盖 ARITHMETIC/CAST/FUNCTION 等子结点，仅靠 WHERE 里对 COMPARISON 的递归会漏掉嵌套子查询。
+ */
+RC prepare_subquery_stmts(Expression *expr, Db *db, unordered_map<string, Table *> *tables);
+
 struct FilterObj
 {
   bool  is_attr;

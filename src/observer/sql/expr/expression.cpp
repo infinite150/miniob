@@ -755,6 +755,11 @@ RC ArithmeticExpr::get_value(const Tuple &tuple, Value &value) const
     return calc_value(left_value, right_value, value);
   }
 
+  if (right_ == nullptr) {
+    LOG_WARN("binary arithmetic missing right operand");
+    return RC::INVALID_ARGUMENT;
+  }
+
   rc = right_->get_value(tuple, right_value);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));

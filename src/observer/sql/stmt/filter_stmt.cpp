@@ -17,8 +17,11 @@ See the Mulan PSL v2 for more details. */
 #include "common/log/log.h"
 #include "common/sys/rc.h"
 #include "sql/expr/expression.h"
+#include "sql/expr/expression_iterator.h"
 #include "storage/db/db.h"
 #include "storage/table/table.h"
+
+using namespace std;
 
 FilterStmt::~FilterStmt()
 {
@@ -51,40 +54,22 @@ RC FilterStmt::create(Db *db, Table *default_table, unordered_map<string, Table 
   return rc;
 }
 
-static RC check_subquery_in_condition(Expression *expr, Db *db, Table *default_table,
-    unordered_map<string, Table *> *tables)
+RC prepare_subquery_stmts(Expression *expr, Db *db, unordered_map<string, Table *> *tables)
 {
+  if (expr == nullptr || db == nullptr) {
+    return RC::SUCCESS;
+  }
   if (expr->type() == ExprType::SUBQUERY) {
     SubQueryExpr *subquery_expr = static_cast<SubQueryExpr *>(expr);
     return subquery_expr->generate_select_stmt(db, tables ? *tables : unordered_map<string, Table *>());
   }
-  if (expr->type() == ExprType::COMPARISON) {
-    auto *cmp = static_cast<ComparisonExpr *>(expr);
-    RC    rc  = check_subquery_in_condition(cmp->left().get(), db, default_table, tables);
-    if (rc != RC::SUCCESS) {
-      return rc;
+  auto visitor = [&](unique_ptr<Expression> &child) -> RC {
+    if (child == nullptr) {
+      return RC::SUCCESS;
     }
-    return check_subquery_in_condition(cmp->right().get(), db, default_table, tables);
-  }
-  if (expr->type() == ExprType::CONJUNCTION) {
-    auto *conj = static_cast<ConjunctionExpr *>(expr);
-    for (auto &child : conj->children()) {
-      RC rc = check_subquery_in_condition(child.get(), db, default_table, tables);
-      if (rc != RC::SUCCESS) {
-        return rc;
-      }
-    }
-  }
-  if (expr->type() == ExprType::VALUE_LIST) {
-    auto *vlist = static_cast<ValueListExpr *>(expr);
-    for (auto &child : vlist->values_mut()) {
-      RC rc = check_subquery_in_condition(child.get(), db, default_table, tables);
-      if (rc != RC::SUCCESS) {
-        return rc;
-      }
-    }
-  }
-  return RC::SUCCESS;
+    return prepare_subquery_stmts(child.get(), db, tables);
+  };
+  return ExpressionIterator::iterate_child_expr(*expr, visitor);
 }
 
 RC FilterStmt::create(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
@@ -96,7 +81,7 @@ RC FilterStmt::create(Db *db, Table *default_table, unordered_map<string, Table 
     return rc;
   }
 
-  rc = check_subquery_in_condition(condition, db, default_table, tables);
+  rc = prepare_subquery_stmts(condition, db, tables);
   if (rc != RC::SUCCESS) {
     delete condition;
     return rc;

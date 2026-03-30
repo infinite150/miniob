@@ -73,13 +73,10 @@ RC UpdateStmt::create(Db *db, UpdateSqlNode &update, Stmt *&stmt)
       LOG_WARN("cannot update invisible(system) field. table=%s, field=%s", table_name, field_name);
       return RC::INVALID_ARGUMENT;
     }
-    if (expr->type() == ExprType::SUBQUERY) {
-      SubQueryExpr *sq = static_cast<SubQueryExpr *>(expr.get());
-      rc               = sq->generate_select_stmt(db, table_map);
-      if (OB_FAIL(rc)) {
-        LOG_WARN("subquery in SET failed. rc=%s", strrc(rc));
-        return rc;
-      }
+    rc = prepare_subquery_stmts(expr.get(), db, &table_map);
+    if (OB_FAIL(rc)) {
+      LOG_WARN("prepare subqueries in SET failed. rc=%s", strrc(rc));
+      return rc;
     }
     BinderContext binder_context;
     binder_context.add_table(table);

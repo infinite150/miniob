@@ -39,6 +39,9 @@ SubQueryExpr::~SubQueryExpr() = default;
 
 RC SubQueryExpr::generate_select_stmt(Db *db, const unordered_map<string, Table *> &tables)
 {
+  if (stmt_ != nullptr) {
+    return RC::SUCCESS;
+  }
   Stmt *select_stmt = nullptr;
   RC    rc          = SelectStmt::create(db, *sql_node_, select_stmt, tables);
   if (rc != RC::SUCCESS) {
@@ -60,6 +63,10 @@ RC SubQueryExpr::generate_select_stmt(Db *db, const unordered_map<string, Table 
 
 RC SubQueryExpr::generate_logical_oper()
 {
+  if (stmt_ == nullptr) {
+    LOG_WARN("subquery logical plan: SelectStmt not built; generate_select_stmt was not run for this node");
+    return RC::INTERNAL;
+  }
   LogicalPlanGenerator generator;
   RC rc = generator.create(stmt_.get(), logical_oper_);
   if (rc != RC::SUCCESS) {

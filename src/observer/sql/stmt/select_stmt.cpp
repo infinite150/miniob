@@ -163,12 +163,26 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
       return rc;
     }
   }
+  for (unique_ptr<Expression> &e : bound_expressions) {
+    rc = prepare_subquery_stmts(e.get(), db, &table_map);
+    if (OB_FAIL(rc)) {
+      LOG_INFO("prepare subqueries in select list failed. rc=%s", strrc(rc));
+      return rc;
+    }
+  }
 
   vector<unique_ptr<Expression>> group_by_expressions;
   for (unique_ptr<Expression> &expression : select_sql.group_by) {
     rc = expression_binder.bind_expression(expression, group_by_expressions);
     if (OB_FAIL(rc)) {
       LOG_INFO("bind expression failed. rc=%s", strrc(rc));
+      return rc;
+    }
+  }
+  for (unique_ptr<Expression> &e : group_by_expressions) {
+    rc = prepare_subquery_stmts(e.get(), db, &table_map);
+    if (OB_FAIL(rc)) {
+      LOG_INFO("prepare subqueries in group by failed. rc=%s", strrc(rc));
       return rc;
     }
   }
