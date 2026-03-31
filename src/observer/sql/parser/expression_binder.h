@@ -14,8 +14,10 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
-#include <unordered_map>
 #include <string>
+#include <utility>
+#include "common/lang/unordered_map.h"
+#include "common/lang/unordered_set.h"
 #include "sql/expr/expression.h"
 
 class BinderContext
@@ -24,16 +26,24 @@ public:
   BinderContext()          = default;
   virtual ~BinderContext() = default;
 
-  void add_table(Table *table) { query_tables_.push_back(table); }
+  void add_table(Table *table);
   void add_table_alias(const char *alias, Table *table);
 
   Table *find_table(const char *table_name) const;
 
   const vector<Table *> &query_tables() const { return query_tables_; }
 
+  /// 输出列时作为表前缀：有别名用别名，否则真实表名
+  std::string table_display_name(Table *table) const;
+
+  bool has_explicit_alias(Table *table) const { return tables_with_explicit_alias_.count(table) != 0; }
+
 private:
-  vector<Table *>                    query_tables_;
-  std::unordered_map<std::string, Table *> alias_map_;
+  vector<Table *>                          query_tables_;
+  /// 后登记优先，子查询内层 FROM 别名可覆盖外层相关名
+  vector<std::pair<std::string, Table *>>  alias_order_;
+  unordered_map<Table *, std::string>      table_display_;
+  unordered_set<Table *>                   tables_with_explicit_alias_;
 };
 
 /**

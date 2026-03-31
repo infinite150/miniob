@@ -127,6 +127,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
         PRIMARY
         KEY
         ANALYZE
+        AS
         FIELDS
         TERMINATED
         ENCLOSED
@@ -236,6 +237,8 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
 %type <expression>          func_expr
 %type <expression>          sub_query_expr
 %type <expression_list>     expression_list
+%type <expression_list>     select_expr_list
+%type <expression>          select_expr
 %type <expression_list>     group_by_list
 %type <expression_list>     group_by
 %type <cstring>             fields_terminated_by
@@ -638,7 +641,7 @@ update_list:
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM from_node from_list where_expr group_by
+    SELECT select_expr_list FROM from_node from_list where_expr group_by
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
@@ -667,13 +670,42 @@ select_stmt:        /*  select 语句的语法解析树*/
         delete $7;
       }
     }
-    | SELECT expression_list
+    | SELECT select_expr_list
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
         $$->selection.expressions.swap(*$2);
         delete $2;
       }
+    }
+    ;
+
+select_expr_list:
+    select_expr
+    {
+      $$ = new vector<unique_ptr<Expression>>;
+      $$->emplace_back(unique_ptr<Expression>($1));
+    }
+    | select_expr_list COMMA select_expr
+    {
+      if ($1 != nullptr) {
+        $$ = $1;
+      } else {
+        $$ = new vector<unique_ptr<Expression>>;
+      }
+      $$->emplace_back(unique_ptr<Expression>($3));
+    }
+    ;
+
+select_expr:
+    expression
+    {
+      $$ = $1;
+    }
+    | expression AS ID
+    {
+      $1->set_name($3);
+      $$ = $1;
     }
     ;
 calc_stmt:
@@ -902,6 +934,17 @@ from_node:
       std::reverse($$->join_relations.begin(), $$->join_relations.end());
       std::reverse($$->conditions.begin(), $$->conditions.end());
     }
+    | ID AS ID join_list {
+      if (nullptr != $4) {
+        $$ = $4;
+      } else {
+        $$ = new InnerJoinSqlNode;
+      }
+      $$->base_relation.first = $1;
+      $$->base_relation.second = $3;
+      std::reverse($$->join_relations.begin(), $$->join_relations.end());
+      std::reverse($$->conditions.begin(), $$->conditions.end());
+    }
     | ID join_list {
       if (nullptr != $2) {
         $$ = $2;
@@ -928,6 +971,15 @@ join_list:
       }
       $$->join_relations.emplace_back($3, $4);
       $$->conditions.push_back($6);
+    }
+    | INNER JOIN ID AS ID ON on_condition join_list {
+      if (nullptr != $8) {
+        $$ = $8;
+      } else {
+        $$ = new InnerJoinSqlNode;
+      }
+      $$->join_relations.emplace_back($3, $5);
+      $$->conditions.push_back($7);
     }
     | INNER JOIN ID ON on_condition join_list {
       if (nullptr != $6) {

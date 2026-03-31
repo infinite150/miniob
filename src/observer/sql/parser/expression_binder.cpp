@@ -21,41 +21,68 @@ See the Mulan PSL v2 for more details. */
 
 using namespace common;
 
+void BinderContext::add_table(Table *table)
+{
+  if (table == nullptr) {
+    return;
+  }
+  query_tables_.push_back(table);
+  if (table_display_.count(table) == 0) {
+    table_display_[table] = table->name();
+  }
+}
+
 void BinderContext::add_table_alias(const char *alias, Table *table)
 {
-  if (alias != nullptr && strlen(alias) > 0) {
-    alias_map_[alias] = table;
+  if (table == nullptr || alias == nullptr || strlen(alias) == 0) {
+    return;
   }
+  alias_order_.push_back({std::string(alias), table});
+  table_display_[table]           = alias;
+  tables_with_explicit_alias_.insert(table);
 }
 
 Table *BinderContext::find_table(const char *table_name) const
 {
   if (table_name != nullptr) {
-    for (const auto &p : alias_map_) {
-      if (0 == strcasecmp(table_name, p.first.c_str())) {
-        return p.second;
+    for (auto it = alias_order_.rbegin(); it != alias_order_.rend(); ++it) {
+      if (0 == strcasecmp(table_name, it->first.c_str())) {
+        return it->second;
       }
     }
   }
   auto pred = [table_name](Table *table) { return 0 == strcasecmp(table_name, table->name()); };
   auto iter = ranges::find_if(query_tables_, pred);
-  if (iter == query_tables_.end()) {
-    return nullptr;
+  if (iter != query_tables_.end()) {
+    return *iter;
   }
-  return *iter;
+  return nullptr;
+}
+
+std::string BinderContext::table_display_name(Table *table) const
+{
+  if (table == nullptr) {
+    return "";
+  }
+  auto it = table_display_.find(table);
+  if (it != table_display_.end()) {
+    return it->second;
+  }
+  return table->name();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-static void wildcard_fields(Table *table, vector<unique_ptr<Expression>> &expressions, bool use_table_prefix)
+static void wildcard_fields(
+    BinderContext &ctx, Table *table, vector<unique_ptr<Expression>> &expressions, bool use_table_prefix)
 {
   const TableMeta &table_meta = table->table_meta();
   const int        field_num  = table_meta.field_num();
+  std::string      prefix     = ctx.table_display_name(table);
   for (int i = table_meta.sys_field_num(); i < field_num; i++) {
     Field      field(table, table_meta.field(i));
     FieldExpr *field_expr = new FieldExpr(field);
     if (use_table_prefix) {
-      std::string qualified = std::string(field.table_name()) + "." + field.field_name();
-      field_expr->set_name(qualified);
+      field_expr->set_name(prefix + "." + field.field_name());
     } else {
       field_expr->set_name(field.field_name());
     }
@@ -177,9 +204,17 @@ RC ExpressionBinder::bind_star_expression(
     tables_to_wildcard.insert(tables_to_wildcard.end(), all_tables.begin(), all_tables.end());
   }
 
-  bool use_table_prefix = (tables_to_wildcard.size() > 1) || (context_.query_tables().size() > 1);
+  bool any_alias = false;
+  for (Table *t : tables_to_wildcard) {
+    if (context_.has_explicit_alias(t)) {
+      any_alias = true;
+      break;
+    }
+  }
+  bool use_table_prefix =
+      (tables_to_wildcard.size() > 1) || (context_.query_tables().size() > 1) || any_alias;
   for (Table *table : tables_to_wildcard) {
-    wildcard_fields(table, bound_expressions, use_table_prefix);
+    wildcard_fields(context_, table, bound_expressions, use_table_prefix);
   }
 
   return RC::SUCCESS;
@@ -232,8 +267,9 @@ RC ExpressionBinder::bind_unbound_field_expression(
   }
 
   if (0 == strcmp(field_name, "*")) {
-    bool use_table_prefix = (context_.query_tables().size() > 1);
-    wildcard_fields(table, bound_expressions, use_table_prefix);
+    bool use_table_prefix =
+        (context_.query_tables().size() > 1) || context_.has_explicit_alias(table);
+    wildcard_fields(context_, table, bound_expressions, use_table_prefix);
   } else {
     const FieldMeta *field_meta = table->table_meta().field(field_name);
     if (nullptr == field_meta) {
@@ -243,12 +279,19 @@ RC ExpressionBinder::bind_unbound_field_expression(
 
     Field      field(table, field_meta);
     FieldExpr *field_expr = new FieldExpr(field);
-    if (context_.query_tables().size() > 1) {
-      // 有显式表名/别名时用 table_name，否则用 table->name()（未限定字段多表解析）
-      std::string qual = !is_blank(table_name) ? std::string(table_name) : std::string(table->name());
-      field_expr->set_name(qual + "." + field_name);
+    const string &parsed_name = unbound_field_expr->name();
+    const bool    explicit_col_alias = !parsed_name.empty() && parsed_name.find('.') == string::npos &&
+                        0 != strcasecmp(parsed_name.c_str(), field_name);
+
+    std::string qual = !is_blank(table_name) ? std::string(table_name) : context_.table_display_name(table);
+    const bool  use_qual_prefix = (context_.query_tables().size() > 1) || !is_blank(table_name) ||
+                                context_.has_explicit_alias(table);
+    std::string default_display = use_qual_prefix ? (qual + "." + field_name) : string(field_name);
+
+    if (explicit_col_alias) {
+      field_expr->set_name(parsed_name);
     } else {
-      field_expr->set_name(field_name);
+      field_expr->set_name(default_display);
     }
     bound_expressions.emplace_back(field_expr);
   }

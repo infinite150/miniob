@@ -13,7 +13,9 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include "sql/stmt/select_stmt.h"
+#include <cctype>
 #include "common/lang/string.h"
+#include "common/lang/unordered_set.h"
 #include "common/log/log.h"
 #include "sql/parser/parse_defs.h"
 #include "sql/stmt/filter_stmt.h"
@@ -54,10 +56,35 @@ SelectStmt::~SelectStmt()
   }
 }
 
+static string alias_key_normalized(const string &alias)
+{
+  string k;
+  k.reserve(alias.size());
+  for (char c : alias) {
+    k.push_back(static_cast<char>(tolower(static_cast<unsigned char>(c))));
+  }
+  return k;
+}
+
 static RC process_from_clause(Db *db, vector<Table *> &tables, unordered_map<string, Table *> &table_map,
     BinderContext &binder_context, vector<InnerJoinSqlNode> &from_relations, vector<SelectStmt::JoinTables> &join_tables)
 {
   RC rc = RC::SUCCESS;
+
+  unordered_set<string> used_aliases_this_select;
+
+  auto check_dup_alias = [&](const string &alias) -> RC {
+    if (alias.empty()) {
+      return RC::SUCCESS;
+    }
+    const string k = alias_key_normalized(alias);
+    if (used_aliases_this_select.count(k)) {
+      LOG_WARN("duplicate table alias in the same query level: %s", alias.c_str());
+      return RC::INVALID_ARGUMENT;
+    }
+    used_aliases_this_select.insert(k);
+    return RC::SUCCESS;
+  };
 
   auto check_and_collect_table = [&](const string &table_name) -> RC {
     if (table_name.empty()) {
@@ -85,6 +112,10 @@ static RC process_from_clause(Db *db, vector<Table *> &tables, unordered_map<str
     Table *base_table = table_map[relations.base_relation.first];
     jt.push_join_table(base_table, nullptr);
     if (!relations.base_relation.second.empty()) {
+      rc = check_dup_alias(relations.base_relation.second);
+      if (rc != RC::SUCCESS) {
+        return rc;
+      }
       table_map[relations.base_relation.second] = base_table;
       binder_context.add_table_alias(relations.base_relation.second.c_str(), base_table);
     }
@@ -97,6 +128,10 @@ static RC process_from_clause(Db *db, vector<Table *> &tables, unordered_map<str
       }
       Table *join_table = table_map[join_table_name];
       if (!relations.join_relations[j].second.empty()) {
+        rc = check_dup_alias(relations.join_relations[j].second);
+        if (rc != RC::SUCCESS) {
+          return rc;
+        }
         table_map[relations.join_relations[j].second] = join_table;
         binder_context.add_table_alias(relations.join_relations[j].second.c_str(), join_table);
       }
