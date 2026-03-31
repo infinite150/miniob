@@ -185,6 +185,9 @@ RC SubQueryExpr::open(Trx *trx)
 
 RC SubQueryExpr::close()
 {
+  if (!opened_) {
+    return RC::SUCCESS;
+  }
   opened_ = false;
   if (physical_oper_ != nullptr) {
     return physical_oper_->close();
@@ -218,7 +221,9 @@ RC SubQueryExpr::try_get_value(Value &value) const
   }
   ValueListTuple dummy;
   SubQueryExpr *self = const_cast<SubQueryExpr *>(this);
-  self->close();
+  if (self->opened_) {
+    self->close();
+  }
   RC rc = self->open(trx_);
   if (rc != RC::SUCCESS) {
     return rc;
@@ -247,9 +252,11 @@ RC SubQueryExpr::get_value(const Tuple &tuple, Value &value) const
   SubQueryExpr *self = const_cast<SubQueryExpr *>(this);
   // 标量子查询：多行 UPDATE / 投影每行、相关子查询均需重新扫描，否则会沿用上次迭代器的 EOF
   if (scalar_subquery_) {
-    RC crc = self->close();
-    if (crc != RC::SUCCESS) {
-      return crc;
+    if (self->opened_) {
+      RC crc = self->close();
+      if (crc != RC::SUCCESS) {
+        return crc;
+      }
     }
     RC orc = self->open(trx_);
     if (orc != RC::SUCCESS) {
