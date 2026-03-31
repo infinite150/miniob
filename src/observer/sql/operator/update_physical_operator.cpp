@@ -29,6 +29,7 @@ UpdatePhysicalOperator::UpdatePhysicalOperator(
 RC UpdatePhysicalOperator::open(Trx *trx)
 {
   trx_ = trx;
+  child_closed_ = false;
   if (table_ != nullptr) {
     table_->add_ref();
   }
@@ -94,7 +95,12 @@ RC UpdatePhysicalOperator::open(Trx *trx)
     old_records.emplace_back(std::move(rec_copy));
   }
 
-  children_[0]->close();
+  RC close_rc = children_[0]->close();
+  if (OB_FAIL(close_rc)) {
+    LOG_WARN("UpdatePhysicalOperator::open failed at children_[0]->close. rc=%s", strrc(close_rc));
+    return close_rc;
+  }
+  child_closed_ = true;
 
   if (rc != RC::RECORD_EOF) {
     LOG_WARN("child operator error. rc=%s", strrc(rc));
@@ -172,12 +178,13 @@ RC UpdatePhysicalOperator::close()
   if (table_ != nullptr) {
     table_->release();
   }
-  if (!children_.empty()) {
+  if (!children_.empty() && !child_closed_) {
     RC rc = children_[0]->close();
     if (rc != RC::SUCCESS) {
       LOG_WARN("failed to close child operator. rc=%s", strrc(rc));
     }
   }
+  child_closed_ = false;
   return RC::SUCCESS;
 }
 

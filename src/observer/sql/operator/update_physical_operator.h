@@ -52,4 +52,5 @@ private:
   vector<unique_ptr<Expression>> *rhs_exprs_ = nullptr;
   Trx    *trx_                = nullptr;
   Session *subquery_session_ = nullptr;
+  bool    child_closed_      = false;
 };
