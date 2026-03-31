@@ -51,6 +51,12 @@ RC IntegerType::cast_to(const Value &val, AttrType type, Value &result) const
     result.set_string(ss.str().c_str());
     return RC::SUCCESS;
   }
+  case AttrType::TEXTS: {
+    stringstream ss;
+    ss << val.get_int();
+    result.set_text(ss.str().c_str());
+    return RC::SUCCESS;
+  }
   default:
     LOG_WARN("unsupported type %d", type);
     return RC::SCHEMA_FIELD_TYPE_MISMATCH;

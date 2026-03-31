@@ -20,6 +20,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/parser/parse.h"
 #include "common/value.h"
 #include "storage/record/record.h"
+#include "storage/record/lob_handler.h"
 #include <strings.h>
 
 class Table;
@@ -214,6 +215,33 @@ public:
     const bool       is_null = (bitmap[byte_index] & static_cast<uint8_t>(1U << bit_index)) != 0;
     if (is_null) {
       cell.set_null();
+      return RC::SUCCESS;
+    }
+
+    if (field_meta->type() == AttrType::TEXTS) {
+      if (field_meta->len() < static_cast<int>(sizeof(LobLocator))) {
+        return RC::INTERNAL;
+      }
+      if (table_->lob_handler() == nullptr) {
+        return RC::INTERNAL;
+      }
+      LobLocator locator;
+      memcpy(&locator, this->record_->data() + field_meta->offset(), sizeof(locator));
+      if (locator.length < 0 || locator.length > TEXT_MAX_BYTES) {
+        return RC::INVALID_ARGUMENT;
+      }
+      cell.set_type(AttrType::TEXTS);
+      if (locator.length == 0) {
+        cell.set_data("", 0);
+        return RC::SUCCESS;
+      }
+      unique_ptr<char[]> text_buf(new char[locator.length + 1]);
+      RC rc = table_->lob_handler()->get_data(locator.offset, locator.length, text_buf.get());
+      if (OB_FAIL(rc)) {
+        return rc;
+      }
+      text_buf[locator.length] = '\0';
+      cell.set_data(text_buf.get(), locator.length);
       return RC::SUCCESS;
     }
 

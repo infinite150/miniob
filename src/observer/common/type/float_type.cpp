@@ -75,6 +75,12 @@ RC FloatType::cast_to(const Value &val, AttrType type, Value &result) const
       result.set_int(static_cast<int>(std::lroundf(val.get_float())));
       return RC::SUCCESS;
     }
+    case AttrType::TEXTS: {
+      stringstream ss;
+      ss << common::double_to_str(val.get_float());
+      result.set_text(ss.str().c_str());
+      return RC::SUCCESS;
+    }
     default: {
       LOG_WARN("unsupported type %d", type);
       return RC::SCHEMA_FIELD_TYPE_MISMATCH;

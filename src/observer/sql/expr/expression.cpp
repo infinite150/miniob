@@ -252,8 +252,8 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
   }
 
   if (comp_ == LIKE_OP || comp_ == NOT_LIKE_OP) {
-    if (left.attr_type() != AttrType::CHARS || right.attr_type() != AttrType::CHARS) {
-      LOG_WARN("[NOT_]LIKE_OP requires both operands to be CHARS type");
+    if (!is_string_type(left.attr_type()) || !is_string_type(right.attr_type())) {
+      LOG_WARN("[NOT_]LIKE_OP requires both operands to be string type");
       return RC::INVALID_ARGUMENT;
     }
     result = comp_ == LIKE_OP ? str_like(left, right) : !str_like(left, right);
@@ -261,10 +261,10 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
   }
 
   // DATE vs CHARS: 转换失败（非法日期）应返回 INVALID_ARGUMENT，使查询返回 FAILURE
-  if ((left.attr_type() == AttrType::DATES && right.attr_type() == AttrType::CHARS) ||
-      (left.attr_type() == AttrType::CHARS && right.attr_type() == AttrType::DATES)) {
+  if ((left.attr_type() == AttrType::DATES && is_string_type(right.attr_type())) ||
+      (is_string_type(left.attr_type()) && right.attr_type() == AttrType::DATES)) {
     Value tmp_date;
-    const Value &chars_val = (left.attr_type() == AttrType::CHARS) ? left : right;
+    const Value &chars_val = is_string_type(left.attr_type()) ? left : right;
     RC conv_rc = DataType::type_instance(AttrType::DATES)->set_value_from_str(tmp_date, chars_val.get_string());
     if (conv_rc != RC::SUCCESS) {
       return RC::INVALID_ARGUMENT;
@@ -477,8 +477,8 @@ RC ComparisonExpr::eval(Chunk &chunk, vector<uint8_t> &select)
     return rc;
   }
   if (left_column.attr_type() != right_column.attr_type()) {
-    if (!((left_column.attr_type() == AttrType::DATES && right_column.attr_type() == AttrType::CHARS) ||
-          (left_column.attr_type() == AttrType::CHARS && right_column.attr_type() == AttrType::DATES))) {
+    if (!((left_column.attr_type() == AttrType::DATES && is_string_type(right_column.attr_type())) ||
+          (is_string_type(left_column.attr_type()) && right_column.attr_type() == AttrType::DATES))) {
       LOG_WARN("cannot compare columns with different types");
       return RC::INTERNAL;
     }
@@ -505,7 +505,7 @@ RC ComparisonExpr::eval(Chunk &chunk, vector<uint8_t> &select)
       }
       select[i] &= result ? 1 : 0;
     }
-  } else if (left_column.attr_type() == AttrType::CHARS) {
+  } else if (is_string_type(left_column.attr_type())) {
     int rows = 0;
     if (left_column.column_type() == Column::Type::CONSTANT_COLUMN) {
       rows = right_column.count();
@@ -1009,7 +1009,7 @@ int FunctionExpr::value_length() const
 
 RC FunctionExpr::eval_length(const Value &arg, Value &result) const
 {
-  if (arg.attr_type() != AttrType::CHARS) {
+  if (!is_string_type(arg.attr_type())) {
     return RC::INVALID_ARGUMENT;
   }
   int len = static_cast<int>(arg.get_string().length());

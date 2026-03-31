@@ -37,7 +37,8 @@ Value::Value(const Value &other)
   this->length_    = other.length_;
   this->own_data_  = other.own_data_;
   switch (this->attr_type_) {
-    case AttrType::CHARS: {
+    case AttrType::CHARS:
+    case AttrType::TEXTS: {
       set_string_from_other(other);
     } break;
 
@@ -67,7 +68,8 @@ Value &Value::operator=(const Value &other)
   this->length_    = other.length_;
   this->own_data_  = other.own_data_;
   switch (this->attr_type_) {
-    case AttrType::CHARS: {
+    case AttrType::CHARS:
+    case AttrType::TEXTS: {
       set_string_from_other(other);
     } break;
 
@@ -97,6 +99,7 @@ void Value::reset()
 {
   switch (attr_type_) {
     case AttrType::CHARS:
+    case AttrType::TEXTS:
       if (own_data_ && value_.pointer_value_ != nullptr) {
         delete[] value_.pointer_value_;
         value_.pointer_value_ = nullptr;
@@ -115,6 +118,9 @@ void Value::set_data(char *data, int length)
   switch (attr_type_) {
     case AttrType::CHARS: {
       set_string(data, length);
+    } break;
+    case AttrType::TEXTS: {
+      set_text(data, length);
     } break;
     case AttrType::INTS: {
       value_.int_value_ = *(int *)data;
@@ -190,6 +196,27 @@ void Value::set_string(const char *s, int len /*= 0*/)
   }
 }
 
+void Value::set_text(const char *s, int len /*= 0*/)
+{
+  reset();
+  attr_type_ = AttrType::TEXTS;
+  if (s == nullptr) {
+    value_.pointer_value_ = nullptr;
+    length_               = 0;
+  } else {
+    own_data_ = true;
+    if (len > 0) {
+      len = strnlen(s, len);
+    } else {
+      len = strlen(s);
+    }
+    value_.pointer_value_ = new char[len + 1];
+    length_               = len;
+    memcpy(value_.pointer_value_, s, len);
+    value_.pointer_value_[len] = '\0';
+  }
+}
+
 void Value::set_empty_string(int len)
 {
   reset();
@@ -218,6 +245,9 @@ void Value::set_value(const Value &value)
     case AttrType::CHARS: {
       set_string(value.get_string().c_str());
     } break;
+    case AttrType::TEXTS: {
+      set_text(value.get_string().c_str());
+    } break;
     case AttrType::BOOLEANS: {
       set_boolean(value.get_boolean());
     } break;
@@ -232,7 +262,7 @@ void Value::set_value(const Value &value)
 
 void Value::set_string_from_other(const Value &other)
 {
-  ASSERT(attr_type_ == AttrType::CHARS, "attr type is not CHARS");
+  ASSERT(is_string_type(attr_type_), "attr type is not string");
   // 必须始终深拷贝 CHAR 并令 own_data_=true。
   // 注意：length_==0 的合法空串也必须保留非空指针（与 set_string 一致），不能置 pointer_=nullptr：
   // Table::set_value_to_record 在 data_len==0 时仍可能 memcpy 1 字节，src==nullptr 会崩溃。
@@ -252,6 +282,9 @@ char *Value::data() const
 {
   switch (attr_type_) {
     case AttrType::CHARS: {
+      return value_.pointer_value_;
+    } break;
+    case AttrType::TEXTS: {
       return value_.pointer_value_;
     } break;
     default: {
@@ -279,16 +312,16 @@ int Value::compare(const Value &other) const
   if (attr_type_ == AttrType::UNDEFINED || other.attr_type() == AttrType::UNDEFINED) {
     return INT32_MAX;
   }
-  if (attr_type_ == AttrType::DATES && other.attr_type() == AttrType::CHARS) {
+  if (attr_type_ == AttrType::DATES && is_string_type(other.attr_type())) {
     return DataType::type_instance(AttrType::DATES)->compare(*this, other);
   }
-  if (attr_type_ == AttrType::CHARS && other.attr_type() == AttrType::DATES) {
+  if (is_string_type(attr_type_) && other.attr_type() == AttrType::DATES) {
     Value left_date;
     RC rc = DataType::type_instance(AttrType::DATES)->set_value_from_str(left_date, get_string());
     if (rc != RC::SUCCESS) return INT32_MAX;
     return DataType::type_instance(AttrType::DATES)->compare(left_date, other);
   }
-  if (attr_type_ == AttrType::CHARS && (other.attr_type() == AttrType::INTS || other.attr_type() == AttrType::FLOATS)) {
+  if (is_string_type(attr_type_) && (other.attr_type() == AttrType::INTS || other.attr_type() == AttrType::FLOATS)) {
     Value left_num;
     if (other.attr_type() == AttrType::INTS) {
       left_num.set_int(get_int());
@@ -297,7 +330,7 @@ int Value::compare(const Value &other) const
     }
     return DataType::type_instance(other.attr_type())->compare(left_num, other);
   }
-  if ((attr_type_ == AttrType::INTS || attr_type_ == AttrType::FLOATS) && other.attr_type() == AttrType::CHARS) {
+  if ((attr_type_ == AttrType::INTS || attr_type_ == AttrType::FLOATS) && is_string_type(other.attr_type())) {
     Value right_num;
     if (attr_type_ == AttrType::INTS) {
       right_num.set_int(other.get_int());
@@ -313,6 +346,14 @@ int Value::get_int() const
 {
   switch (attr_type_) {
     case AttrType::CHARS: {
+      try {
+        return (int)(stol(value_.pointer_value_));
+      } catch (exception const &ex) {
+        LOG_TRACE("failed to convert string to number. s=%s, ex=%s", value_.pointer_value_, ex.what());
+        return 0;
+      }
+    }
+    case AttrType::TEXTS: {
       try {
         return (int)(stol(value_.pointer_value_));
       } catch (exception const &ex) {
@@ -344,6 +385,14 @@ float Value::get_float() const
 {
   switch (attr_type_) {
     case AttrType::CHARS: {
+      try {
+        return stof(value_.pointer_value_);
+      } catch (exception const &ex) {
+        LOG_TRACE("failed to convert string to float. s=%s, ex=%s", value_.pointer_value_, ex.what());
+        return 0.0;
+      }
+    } break;
+    case AttrType::TEXTS: {
       try {
         return stof(value_.pointer_value_);
       } catch (exception const &ex) {
@@ -384,6 +433,12 @@ int32_t Value::get_date() const
       if (rc != RC::SUCCESS) return 0;
       return v.get_date();
     }
+    case AttrType::TEXTS: {
+      Value v;
+      RC rc = DataType::type_instance(AttrType::DATES)->set_value_from_str(v, get_string());
+      if (rc != RC::SUCCESS) return 0;
+      return v.get_date();
+    }
     default:
       LOG_WARN("unknown data type for get_date. type=%d", static_cast<int>(attr_type_));
       return 0;
@@ -392,7 +447,7 @@ int32_t Value::get_date() const
 
 string_t Value::get_string_t() const
 {
-  ASSERT(attr_type_ == AttrType::CHARS, "attr type is not CHARS");
+  ASSERT(is_string_type(attr_type_), "attr type is not string");
   return string_t(value_.pointer_value_, length_);
 }
 
@@ -400,6 +455,24 @@ bool Value::get_boolean() const
 {
   switch (attr_type_) {
     case AttrType::CHARS: {
+      try {
+        float val = stof(value_.pointer_value_);
+        if (val >= EPSILON || val <= -EPSILON) {
+          return true;
+        }
+
+        int int_val = stol(value_.pointer_value_);
+        if (int_val != 0) {
+          return true;
+        }
+
+        return value_.pointer_value_ != nullptr;
+      } catch (exception const &ex) {
+        LOG_TRACE("failed to convert string to float or integer. s=%s, ex=%s", value_.pointer_value_, ex.what());
+        return value_.pointer_value_ != nullptr;
+      }
+    } break;
+    case AttrType::TEXTS: {
       try {
         float val = stof(value_.pointer_value_);
         if (val >= EPSILON || val <= -EPSILON) {

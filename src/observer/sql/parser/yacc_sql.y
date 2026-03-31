@@ -108,6 +108,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
         FLOAT_T
         DATE_T
         VECTOR_T
+        TEXT_T
         HELP
         EXIT
         DOT //QUOTE
@@ -482,6 +483,7 @@ type:
     | FLOAT_T  { $$ = static_cast<int>(AttrType::FLOATS); }
     | DATE_T   { $$ = static_cast<int>(AttrType::DATES); }
     | VECTOR_T { $$ = static_cast<int>(AttrType::VECTORS); }
+    | TEXT_T   { $$ = static_cast<int>(AttrType::TEXTS); }
     ;
 primary_key:
     /* empty */

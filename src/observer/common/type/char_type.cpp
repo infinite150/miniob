@@ -16,7 +16,7 @@ See the Mulan PSL v2 for more details. */
 
 int CharType::compare(const Value &left, const Value &right) const
 {
-  ASSERT(left.attr_type() == AttrType::CHARS && right.attr_type() == AttrType::CHARS, "invalid type");
+  ASSERT(left.attr_type() == AttrType::CHARS && is_string_type(right.attr_type()), "invalid type");
   return common::compare_string(
       (void *)left.value_.pointer_value_, left.length_, (void *)right.value_.pointer_value_, right.length_);
 }
@@ -32,6 +32,9 @@ RC CharType::cast_to(const Value &val, AttrType type, Value &result) const
   switch (type) {
     case AttrType::DATES:
       return DataType::type_instance(AttrType::DATES)->set_value_from_str(result, val.get_string());
+    case AttrType::TEXTS:
+      result.set_text(val.get_string().c_str());
+      return RC::SUCCESS;
     default: return RC::UNIMPLEMENTED;
   }
   return RC::SUCCESS;
@@ -41,6 +44,9 @@ int CharType::cast_cost(AttrType type)
 {
   if (type == AttrType::CHARS) {
     return 0;
+  }
+  if (type == AttrType::TEXTS) {
+    return 1;
   }
   if (type == AttrType::DATES) {
     return 1;

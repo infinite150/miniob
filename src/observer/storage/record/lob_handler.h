@@ -15,6 +15,18 @@ See the Mulan PSL v2 for more details. */
 #include "common/types.h"
 #include "storage/persist/persist.h"
 
+static constexpr int32_t TEXT_MAX_BYTES = 65535;
+
+/**
+ * @brief 记录内的 TEXT 定位信息（定长，便于行存储）
+ */
+struct LobLocator
+{
+  int64_t offset = -1;
+  int32_t length = 0;
+  int32_t reserved = 0;
+};
+
 /**
  * @brief 管理LOB文件中的 LOB 对象
  * @ingroup RecordManager

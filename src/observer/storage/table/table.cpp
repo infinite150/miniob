@@ -28,12 +28,26 @@ See the Mulan PSL v2 for more details. */
 #include "storage/index/bplus_tree_index.h"
 #include "storage/index/index.h"
 #include "storage/record/record_manager.h"
+#include "storage/record/lob_handler.h"
 #include "storage/table/table.h"
 #include "storage/trx/trx.h"
 #include "storage/record/heap_record_scanner.h"
 #include "storage/record/lsm_record_scanner.h"
 #include "storage/table/heap_table_engine.h"
 #include "storage/table/lsm_table_engine.h"
+
+namespace {
+bool table_has_text_field(const TableMeta &meta)
+{
+  for (int i = meta.sys_field_num(); i < meta.field_num(); i++) {
+    const FieldMeta *field = meta.field(i);
+    if (field != nullptr && field->type() == AttrType::TEXTS) {
+      return true;
+    }
+  }
+  return false;
+}
+}  // namespace
 
 Table::~Table()
 {
@@ -115,6 +129,16 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
     LOG_WARN("Unsupported storage engine type: %d", table_meta_.storage_engine());
     return rc;
   }
+  if (table_has_text_field(table_meta_)) {
+    lob_handler_ = new LobFileHandler();
+    string lob_file = table_lob_file(base_dir, name);
+    rc = lob_handler_->create_file(lob_file.c_str());
+    if (OB_FAIL(rc)) {
+      LOG_WARN("failed to create table lob file. file=%s rc=%s", lob_file.c_str(), strrc(rc));
+      return rc;
+    }
+  }
+
   rc = engine_->open();
   if (rc != RC::SUCCESS) {
     LOG_WARN("Failed to open table %s due to engine open failed.", data_file.c_str());
@@ -161,6 +185,19 @@ RC Table::open(Db *db, const char *meta_file, const char *base_dir)
     rc = RC::UNSUPPORTED;
     LOG_ERROR("Unsupported storage engine type: %d", table_meta_.storage_engine());
     return rc;
+  }
+
+  if (table_has_text_field(table_meta_)) {
+    lob_handler_ = new LobFileHandler();
+    string lob_file = table_lob_file(base_dir, table_meta_.name());
+    rc = lob_handler_->open_file(lob_file.c_str());
+    if (rc == RC::FILE_NOT_EXIST) {
+      rc = lob_handler_->create_file(lob_file.c_str());
+    }
+    if (OB_FAIL(rc)) {
+      LOG_WARN("failed to open table lob file. file=%s rc=%s", lob_file.c_str(), strrc(rc));
+      return rc;
+    }
   }
 
   rc = engine_->open();
@@ -296,6 +333,38 @@ RC Table::set_value_to_record(char *record_data, const Value &value, const Field
       return RC::INTERNAL;
     }
     memcpy(record_data + field->offset(), src, copy_len);
+    return RC::SUCCESS;
+  }
+  if (field->type() == AttrType::TEXTS) {
+    if (!is_string_type(value.attr_type())) {
+      LOG_WARN("TEXT field expects string value. field=%s type=%d", field->name(), value.attr_type());
+      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    }
+    if (value.length() > TEXT_MAX_BYTES) {
+      LOG_WARN("TEXT value exceeds max bytes. field=%s len=%d max=%d", field->name(), value.length(), TEXT_MAX_BYTES);
+      return RC::INVALID_ARGUMENT;
+    }
+    if (field->len() < static_cast<int>(sizeof(LobLocator))) {
+      LOG_WARN("TEXT field storage length too small. field=%s len=%d", field->name(), field->len());
+      return RC::INTERNAL;
+    }
+    if (lob_handler_ == nullptr) {
+      LOG_WARN("TEXT write requires lob handler. table=%s", table_meta_.name());
+      return RC::INTERNAL;
+    }
+
+    LobLocator locator;
+    locator.length = value.length();
+    if (locator.length > 0) {
+      RC rc = lob_handler_->insert_data(locator.offset, locator.length, value.data());
+      if (OB_FAIL(rc)) {
+        LOG_WARN("failed to write TEXT data to lob file. table=%s field=%s rc=%s",
+            table_meta_.name(), field->name(), strrc(rc));
+        return rc;
+      }
+    }
+    memset(record_data + field->offset(), 0, field->len());
+    memcpy(record_data + field->offset(), &locator, sizeof(locator));
     return RC::SUCCESS;
   }
 

@@ -111,7 +111,7 @@ int DateType::compare(const Value &left, const Value &right) const
 
   if (right.attr_type() == AttrType::DATES) {
     right_val = right.get_date();
-  } else if (right.attr_type() == AttrType::CHARS) {
+  } else if (is_string_type(right.attr_type())) {
     Value right_date;
     RC rc = set_value_from_str(right_date, right.get_string());
     if (rc != RC::SUCCESS) {
@@ -139,7 +139,7 @@ int DateType::compare(const Column &left, const Column &right, int left_idx, int
 RC DateType::cast_to(const Value &val, AttrType type, Value &result) const
 {
   if (type == AttrType::DATES) {
-    if (val.attr_type() == AttrType::CHARS) {
+    if (is_string_type(val.attr_type())) {
       return set_value_from_str(result, val.get_string());
     }
     if (val.attr_type() == AttrType::DATES) {
@@ -155,6 +155,15 @@ RC DateType::cast_to(const Value &val, AttrType type, Value &result) const
       return rc;
     }
     result.set_string(s.c_str());
+    return RC::SUCCESS;
+  }
+  if (type == AttrType::TEXTS) {
+    string s;
+    RC rc = to_string(val, s);
+    if (rc != RC::SUCCESS) {
+      return rc;
+    }
+    result.set_text(s.c_str());
     return RC::SUCCESS;
   }
 

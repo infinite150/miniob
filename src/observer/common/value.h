@@ -133,6 +133,7 @@ public:
   void set_int(int val);
   void set_float(float val);
   void set_string(const char *s, int len = 0);
+  void set_text(const char *s, int len = 0);
   void set_empty_string(int len);
   void set_string_from_other(const Value &other);
   void set_date(int32_t date_days);  ///< DATE: days since 1970-01-01
@@ -149,6 +150,6 @@ private:
     char   *pointer_value_;
   } value_ = {.int_value_ = 0};
 
-  /// 是否申请并占有内存, 目前对于 CHARS 类型 own_data_ 为true, 其余类型 own_data_ 为false
+  /// 是否申请并占有内存, 目前对于 CHARS/TEXTS 类型 own_data_ 为true, 其余类型 own_data_ 为false
   bool own_data_ = false;
 };
