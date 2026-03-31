@@ -224,8 +224,8 @@ static void replace_all(std::string &str, const std::string &from, const std::st
 }
 static bool str_like(const Value &left, const Value &right)
 {
-  std::string raw_str(left.attr_type() == AttrType::CHARS ? left.get_string() : "");
-  std::string raw_reg(right.attr_type() == AttrType::CHARS ? right.get_string() : "");
+  std::string raw_str(is_string_type(left.attr_type()) ? left.get_string() : "");
+  std::string raw_reg(is_string_type(right.attr_type()) ? right.get_string() : "");
   replace_all(raw_reg, "_", "[^']");
   replace_all(raw_reg, "%", "[^']*");
   std::regex reg(raw_reg.c_str(), std::regex_constants::ECMAScript | std::regex_constants::icase);

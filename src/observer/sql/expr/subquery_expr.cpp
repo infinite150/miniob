@@ -250,6 +250,11 @@ RC SubQueryExpr::get_value(const Tuple &tuple, Value &value) const
     return RC::INVALID_ARGUMENT;
   }
   SubQueryExpr *self = const_cast<SubQueryExpr *>(this);
+  auto close_if_scalar_on_exit = [self]() {
+    if (self->scalar_subquery_ && self->opened_) {
+      self->close();
+    }
+  };
   // 标量子查询：多行 UPDATE / 投影每行、相关子查询均需重新扫描，否则会沿用上次迭代器的 EOF
   if (scalar_subquery_) {
     if (self->opened_) {
@@ -275,24 +280,30 @@ RC SubQueryExpr::get_value(const Tuple &tuple, Value &value) const
     if (rc == RC::RECORD_EOF) {
       value.set_null();
       // 标量子查询：0 行 -> SUCCESS + NULL。IN/EXISTS 等置 scalar_subquery_=false，仍返回 RECORD_EOF。
+      close_if_scalar_on_exit();
       return scalar_subquery_ ? RC::SUCCESS : RC::RECORD_EOF;
     }
+    close_if_scalar_on_exit();
     return rc;
   }
   Tuple *row = physical_oper_->current_tuple();
   if (row == nullptr) {
+    close_if_scalar_on_exit();
     return RC::INTERNAL;
   }
   RC cell_rc = row->cell_at(0, value);
   if (cell_rc != RC::SUCCESS) {
+    close_if_scalar_on_exit();
     return cell_rc;
   }
   // 标量子查询：多于 1 行必须失败；单行（含 cell 为 NULL）保持 SUCCESS + NULL，不因 is_null 失败。
   if (scalar_subquery_) {
     RC probe_rc = check_scalar_at_most_one_row(tuple);
     if (probe_rc != RC::SUCCESS) {
+      close_if_scalar_on_exit();
       return probe_rc;
     }
+    close_if_scalar_on_exit();
   }
   return RC::SUCCESS;
 }

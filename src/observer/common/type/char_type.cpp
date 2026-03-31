@@ -16,9 +16,14 @@ See the Mulan PSL v2 for more details. */
 
 int CharType::compare(const Value &left, const Value &right) const
 {
-  ASSERT(left.attr_type() == AttrType::CHARS && is_string_type(right.attr_type()), "invalid type");
-  return common::compare_string(
-      (void *)left.value_.pointer_value_, left.length_, (void *)right.value_.pointer_value_, right.length_);
+  if (left.attr_type() != AttrType::CHARS || !is_string_type(right.attr_type())) {
+    LOG_WARN("CHAR compare with unexpected operand type. left=%d right=%d", left.attr_type(), right.attr_type());
+    const string left_str  = left.to_string();
+    const string right_str = right.to_string();
+    return common::compare_string(
+        (void *)left_str.c_str(), left_str.size(), (void *)right_str.c_str(), right_str.size());
+  }
+  return common::compare_string((void *)left.data(), left.length(), (void *)right.data(), right.length());
 }
 
 RC CharType::set_value_from_str(Value &val, const string &data) const
