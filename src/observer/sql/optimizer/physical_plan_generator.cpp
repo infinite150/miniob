@@ -298,6 +298,14 @@ RC PhysicalPlanGenerator::create_plan(ProjectLogicalOperator &project_oper, uniq
     }
   }
 
+  // 与 Predicate 对 WHERE 子句的处理一致：投影列表中的标量子查询须先建好物理计划，否则 open/get_value 会失败。
+  for (unique_ptr<Expression> &expr : project_oper.expressions()) {
+    ExpressionIterator::for_each_subquery(*expr, [session](SubQueryExpr &sq) {
+      sq.generate_logical_oper();
+      sq.generate_physical_oper(session);
+    });
+  }
+
   auto project_operator = make_unique<ProjectPhysicalOperator>(std::move(project_oper.expressions()));
   if (child_phy_oper) {
     project_operator->add_child(std::move(child_phy_oper));
@@ -506,6 +514,13 @@ RC PhysicalPlanGenerator::create_vec_plan(ProjectLogicalOperator &project_oper, 
       LOG_WARN("failed to create project logical operator's child physical operator. rc=%s", strrc(rc));
       return rc;
     }
+  }
+
+  for (unique_ptr<Expression> &expr : project_oper.expressions()) {
+    ExpressionIterator::for_each_subquery(*expr, [session](SubQueryExpr &sq) {
+      sq.generate_logical_oper();
+      sq.generate_physical_oper(session);
+    });
   }
 
   auto project_operator = make_unique<ProjectVecPhysicalOperator>(std::move(project_oper.expressions()));

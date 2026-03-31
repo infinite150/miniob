@@ -71,6 +71,10 @@ RC SubQueryExpr::generate_logical_oper()
   if (logical_oper_ != nullptr) {
     return RC::SUCCESS;
   }
+  if (stmt_->query_expressions().empty()) {
+    LOG_WARN("subquery logical plan: SelectStmt has no query expressions (already consumed or invalid)");
+    return RC::INTERNAL;
+  }
   // 必须在 move 走 stmt_ 上的表达式树之前建立嵌套子查询的 parent 链（相关子查询）。
   bind_nested_subquery_parents();
   LogicalPlanGenerator generator;
