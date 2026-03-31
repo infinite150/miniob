@@ -279,13 +279,27 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
 
 RC Table::set_value_to_record(char *record_data, const Value &value, const FieldMeta *field)
 {
-  size_t       copy_len = field->len();
-  const size_t data_len = value.length();
   if (field->type() == AttrType::CHARS) {
+    const size_t  field_len = field->len();
+    const size_t  data_len  = value.length();
+    const char   *src       = reinterpret_cast<const char *>(value.data());
+    if (data_len == 0) {
+      memset(record_data + field->offset(), 0, field_len);
+      return RC::SUCCESS;
+    }
+    size_t copy_len = field_len;
     if (copy_len > data_len) {
       copy_len = data_len + 1;
     }
+    if (src == nullptr) {
+      LOG_WARN("CHAR write: null data with positive length. field=%s", field->name());
+      return RC::INTERNAL;
+    }
+    memcpy(record_data + field->offset(), src, copy_len);
+    return RC::SUCCESS;
   }
+
+  size_t copy_len = field->len();
   memcpy(record_data + field->offset(), value.data(), copy_len);
   return RC::SUCCESS;
 }

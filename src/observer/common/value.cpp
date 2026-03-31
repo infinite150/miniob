@@ -233,13 +233,14 @@ void Value::set_value(const Value &value)
 void Value::set_string_from_other(const Value &other)
 {
   ASSERT(attr_type_ == AttrType::CHARS, "attr type is not CHARS");
-  // 必须始终深拷贝 CHAR 字节并置 own_data_=true。旧逻辑仅在 own_data_ 为真时分配，
-  // 若 other 为非自持有视图（own_data_=false）或复制路径未同步指针，会留下未初始化的
-  // pointer_value_；后续 Table::set_value_to_record 等对 value.data() 的 memcpy 会崩溃。
+  // 必须始终深拷贝 CHAR 并令 own_data_=true。
+  // 注意：length_==0 的合法空串也必须保留非空指针（与 set_string 一致），不能置 pointer_=nullptr：
+  // Table::set_value_to_record 在 data_len==0 时仍可能 memcpy 1 字节，src==nullptr 会崩溃。
   own_data_ = true;
-  if (length_ <= 0 || other.value_.pointer_value_ == nullptr) {
-    value_.pointer_value_ = nullptr;
-    length_               = 0;
+  if (other.value_.pointer_value_ == nullptr || length_ <= 0) {
+    value_.pointer_value_ = new char[1];
+    value_.pointer_value_[0] = '\0';
+    length_                  = 0;
     return;
   }
   value_.pointer_value_ = new char[length_ + 1];
