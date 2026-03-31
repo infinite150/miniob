@@ -659,7 +659,6 @@ select_stmt:        /*  select 语句的语法解析树*/
         }
         delete $5;
       }
-      std::reverse($$->selection.relations.begin(), $$->selection.relations.end());
 
       if ($6 != nullptr) {
         $$->selection.condition_expr = $6;
@@ -917,7 +916,8 @@ from_list:
       } else {
         $$ = new vector<InnerJoinSqlNode>;
       }
-      $$->emplace_back(std::move(*$2));
+      /* 右递归 from_list 原先末尾追加导致逗号表顺序与书写顺序相反；插到开头以保持与 FROM 从左到右一致 */
+      $$->insert($$->begin(), std::move(*$2));
       delete $2;
     }
     ;

@@ -67,6 +67,12 @@ RC SubQueryExpr::generate_logical_oper()
     LOG_WARN("subquery logical plan: SelectStmt not built; generate_select_stmt was not run for this node");
     return RC::INTERNAL;
   }
+  // 第二次调用时 SelectStmt::query_expressions 可能已被 move 到 ProjectLogicalOperator，禁止重复 create。
+  if (logical_oper_ != nullptr) {
+    return RC::SUCCESS;
+  }
+  // 必须在 move 走 stmt_ 上的表达式树之前建立嵌套子查询的 parent 链（相关子查询）。
+  bind_nested_subquery_parents();
   LogicalPlanGenerator generator;
   RC rc = generator.create(stmt_.get(), logical_oper_);
   if (rc != RC::SUCCESS) {
@@ -80,6 +86,9 @@ RC SubQueryExpr::generate_physical_oper(Session *session)
 {
   if (logical_oper_ == nullptr) {
     return RC::INVALID_ARGUMENT;
+  }
+  if (physical_oper_ != nullptr) {
+    return RC::SUCCESS;
   }
   Rewriter rewriter;
   bool change_made = false;
@@ -97,7 +106,6 @@ RC SubQueryExpr::generate_physical_oper(Session *session)
     LOG_WARN("subquery physical oper generate failed. rc=%s", strrc(rc));
     return rc;
   }
-  bind_nested_subquery_parents();
   return RC::SUCCESS;
 }
 
