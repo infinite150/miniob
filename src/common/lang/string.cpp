@@ -271,7 +271,9 @@ char *substr(const char *s, int n1, int n2)
 string double_to_str(double v)
 {
   char buf[256];
-  double rounded_v = round(v * 100.0) / 100.0;
+  // Compensate tiny float accumulation noise before 2-digit rounding.
+  constexpr double kRoundEpsilon = 1e-5;
+  double rounded_v = round((v - kRoundEpsilon) * 100.0) / 100.0;
   snprintf(buf, sizeof(buf), "%.2f", rounded_v);
   size_t len = strlen(buf);
   while (buf[len - 1] == '0') {

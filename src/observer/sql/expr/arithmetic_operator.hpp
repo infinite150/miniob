@@ -129,6 +129,11 @@ struct LessEqual
 
 struct AddOperator
 {
+  static inline float operation(float left, float right)
+  {
+    return static_cast<float>(static_cast<double>(left) + static_cast<double>(right));
+  }
+
   template <class T>
   static inline T operation(T left, T right)
   {
@@ -144,6 +149,11 @@ struct AddOperator
 
 struct SubtractOperator
 {
+  static inline float operation(float left, float right)
+  {
+    return static_cast<float>(static_cast<double>(left) - static_cast<double>(right));
+  }
+
   template <class T>
   static inline T operation(T left, T right)
   {
@@ -159,6 +169,11 @@ struct SubtractOperator
 
 struct MultiplyOperator
 {
+  static inline float operation(float left, float right)
+  {
+    return static_cast<float>(static_cast<double>(left) * static_cast<double>(right));
+  }
+
   template <class T>
   static inline T operation(T left, T right)
   {
@@ -174,6 +189,11 @@ struct MultiplyOperator
 
 struct DivideOperator
 {
+  static inline float operation(float left, float right)
+  {
+    return static_cast<float>(static_cast<double>(left) / static_cast<double>(right));
+  }
+
   template <class T>
   static inline T operation(T left, T right)
   {
@@ -197,6 +217,11 @@ struct DivideOperator
 
 struct NegateOperator
 {
+  static inline float operation(float input)
+  {
+    return static_cast<float>(-static_cast<double>(input));
+  }
+
   template <class T>
   static inline T operation(T input)
   {
