@@ -17,7 +17,7 @@ INSERT INTO upd_cnt VALUES (2);
 UPDATE upd_dst SET n=(SELECT COUNT(*) FROM upd_cnt) WHERE id<=2;
 -- sort SELECT id, n FROM upd_dst;
 
--- echo regression: sequence update/select should not duplicate rows after failed subquery update
+-- echo regression: scalar subquery returning >1 row must FAILURE (not crash); data unchanged
 CREATE TABLE upd_seq(id int, n int);
 INSERT INTO upd_seq VALUES (1, 10);
 INSERT INTO upd_seq VALUES (2, 20);
@@ -32,6 +32,15 @@ SELECT COUNT(*) FROM upd_seq;
 UPDATE upd_seq SET n=(SELECT v FROM upd_seq_src WHERE upd_seq_src.id=1) WHERE id=2;
 -- sort SELECT id, n FROM upd_seq;
 SELECT COUNT(*) FROM upd_seq;
+
+-- echo regression: duplicate key rows make scalar CHAR subquery multi-row; UPDATE must FAILURE
+CREATE TABLE upd_scalar_dup_t1(id int, t_name char(10), c1 int, c2 int);
+CREATE TABLE upd_scalar_dup_t2(id int, t_name char(10), c1 int, c2 int);
+INSERT INTO upd_scalar_dup_t1 VALUES (7, 'WYXSZZC', 8, 2);
+INSERT INTO upd_scalar_dup_t1 VALUES (7, 'QU', 5, 9);
+INSERT INTO upd_scalar_dup_t2 VALUES (1, 'INIT', 0, 0);
+UPDATE upd_scalar_dup_t2 SET t_name=(SELECT upd_scalar_dup_t1.t_name FROM upd_scalar_dup_t1 WHERE upd_scalar_dup_t1.id=7);
+-- sort SELECT id, t_name, c1, c2 FROM upd_scalar_dup_t2;
 
 -- echo regression: same-table scalar subquery UPDATE should read inner tuple values
 CREATE TABLE upd_self(id int, name char(10), c2 int);

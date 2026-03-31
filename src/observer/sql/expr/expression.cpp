@@ -420,7 +420,7 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
       left_value.set_null();
       rc = RC::SUCCESS;
     }
-    // 标量多行：由 SubQueryExpr::get_value(scalar) 内检测，此处不再 has_more_row，避免重复 next()
+    // 标量多行：由 SubQueryExpr::get_value(scalar) 内 probe 检测，此处不再二次 next()，避免重复消耗
     left_subquery->close();
   }
   if (rc != RC::SUCCESS) {

@@ -192,15 +192,23 @@ RC SubQueryExpr::close()
   return RC::SUCCESS;
 }
 
-bool SubQueryExpr::has_more_row(const Tuple &tuple) const
+RC SubQueryExpr::check_scalar_at_most_one_row(const Tuple &tuple) const
 {
   if (physical_oper_ == nullptr) {
-    return false;
+    return RC::SUCCESS;
   }
   const Tuple *pt = resolve_parent_tuple(tuple);
   physical_oper_->set_parent_tuple(pt);
   RC rc = physical_oper_->next();
-  return rc == RC::SUCCESS;
+  if (rc == RC::RECORD_EOF) {
+    return RC::SUCCESS;
+  }
+  if (rc == RC::SUCCESS) {
+    LOG_WARN("scalar subquery returned more than one row");
+    return RC::INVALID_ARGUMENT;
+  }
+  LOG_WARN("scalar subquery multi-row probe failed. rc=%s", strrc(rc));
+  return rc;
 }
 
 RC SubQueryExpr::try_get_value(Value &value) const
@@ -274,8 +282,9 @@ RC SubQueryExpr::get_value(const Tuple &tuple, Value &value) const
   }
   // 标量子查询：多于 1 行必须失败；单行（含 cell 为 NULL）保持 SUCCESS + NULL，不因 is_null 失败。
   if (scalar_subquery_) {
-    if (has_more_row(tuple)) {
-      return RC::INVALID_ARGUMENT;
+    RC probe_rc = check_scalar_at_most_one_row(tuple);
+    if (probe_rc != RC::SUCCESS) {
+      return probe_rc;
     }
   }
   return RC::SUCCESS;

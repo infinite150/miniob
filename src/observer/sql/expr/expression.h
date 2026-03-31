@@ -693,7 +693,6 @@ public:
 
   RC open(Trx *trx);
   RC close();
-  bool has_more_row(const Tuple &tuple) const;
 
   void   set_trx(Trx *trx) { trx_ = trx; }
   Trx *  get_trx() const { return trx_; }
@@ -722,6 +721,8 @@ public:
 private:
   const Tuple *resolve_parent_tuple(const Tuple &tuple) const;
   void bind_nested_subquery_parents();
+  /// After one row was read: EOF => at most one row; SUCCESS => second row exists; else propagate iterator error.
+  RC check_scalar_at_most_one_row(const Tuple &tuple) const;
 
   unique_ptr<SelectSqlNode>    sql_node_;
   unique_ptr<SelectStmt>       stmt_;
