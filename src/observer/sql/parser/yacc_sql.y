@@ -701,10 +701,30 @@ select_expr:
     {
       $$ = $1;
     }
+    | '*'
+    {
+      $$ = new StarExpr();
+    }
+    | ID DOT '*'
+    {
+      $$ = new StarExpr($1);
+    }
     | expression AS ID
     {
       $1->set_name($3);
       $$ = $1;
+    }
+    | '*' AS ID
+    {
+      $$ = nullptr;
+      yyerror(&@$, sql_string, sql_result, scanner, "star cannot have column alias");
+      YYERROR;
+    }
+    | ID DOT '*' AS ID
+    {
+      $$ = nullptr;
+      yyerror(&@$, sql_string, sql_result, scanner, "qualified star cannot have column alias");
+      YYERROR;
     }
     ;
 calc_stmt:
@@ -751,12 +771,6 @@ expression:
     }
     | '-' expression %prec UMINUS {
       $$ = create_arithmetic_expression(ArithmeticExpr::Type::NEGATIVE, $2, nullptr, sql_string, &@$);
-    }
-    | '*' {
-      $$ = new StarExpr();
-    }
-    | ID DOT '*' {
-      $$ = new StarExpr($1);
     }
     | value %prec UMINUS {
       $$ = new ValueExpr(*$1);
