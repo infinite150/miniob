@@ -810,6 +810,10 @@ aggregate_expression:
     ID LBRACE expression RBRACE {
       $$ = create_aggregate_expression($1, $3, sql_string, &@$);
     }
+    /* COUNT(*) 等：* 不能放回 expression（会与乘法冲突），单独在此接收 */
+    | ID LBRACE '*' RBRACE {
+      $$ = create_aggregate_expression($1, new StarExpr(), sql_string, &@$);
+    }
     ;
 
 func_expr:
