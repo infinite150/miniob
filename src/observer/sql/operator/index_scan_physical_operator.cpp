@@ -142,8 +142,10 @@ RC IndexScanPhysicalOperator::filter(RowTuple &tuple, bool &result)
   Value value;
   const Tuple *eval_tuple = &tuple;
   if (parent_tuple_ != nullptr) {
-    combined_tuple_.set_left(const_cast<Tuple *>(parent_tuple_));
-    combined_tuple_.set_right(&tuple);
+    // 与 TableScan / Predicate 一致：内层扫描行在 left，父层 tuple 在 right，
+    // 未限定列名时优先匹配当前扫描表，避免命中外层同名列。
+    combined_tuple_.set_left(&tuple);
+    combined_tuple_.set_right(const_cast<Tuple *>(parent_tuple_));
     eval_tuple = &combined_tuple_;
   }
   for (unique_ptr<Expression> &expr : predicates_) {

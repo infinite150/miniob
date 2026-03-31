@@ -24,13 +24,19 @@ void SqlResult::set_tuple_schema(const TupleSchema &schema) { tuple_schema_ = sc
 
 RC SqlResult::open()
 {
-  if (nullptr == operator_) {
+  if (nullptr == operator_ || session_ == nullptr) {
     return RC::INVALID_ARGUMENT;
   }
 
   Trx *trx = session_->current_trx();
   trx->start_if_need();
-  return operator_->open(trx);
+  // ExecuteStage 把 UPDATE 等计划放进 SqlResult 后不走 UpdateExecutor，此处需保证
+  // 算子 open 期间 thread-local Session 与 session_ 一致（子查询准备、索引/MVCC 辅助逻辑会读 current_session）。
+  Session *prev = Session::current_session();
+  Session::set_current_session(session_);
+  RC rc = operator_->open(trx);
+  Session::set_current_session(prev);
+  return rc;
 }
 
 RC SqlResult::close()
