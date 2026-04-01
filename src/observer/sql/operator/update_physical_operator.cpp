@@ -139,15 +139,8 @@ RC UpdatePhysicalOperator::open(Trx *trx)
   return RC::SUCCESS;
 
 rollback:
-  // MVCC 模式下，当前语句的 delete/insert 已完整记录在事务操作集中，
-  // 由外层执行器在语句失败时统一调用 trx->rollback() 回溯。
-  // 这里若再做手工补偿（delete+insert）会与事务回滚叠加，放大副作用。
-  if (trx_ != nullptr && trx_->type() == TrxKit::Type::MVCC) {
-    LOG_WARN("UpdatePhysicalOperator::open rollback path in MVCC mode, defer recovery to outer trx->rollback. rc=%s",
-        strrc(rc));
-    return rc;
-  }
-
+  // 语句失败时要做语句级补偿，特别是显式事务(BEGIN)场景下外层不会自动 rollback。
+  // 这里统一走补偿逻辑，把当前语句已完成的改动回退，避免事务内后续语句读到半执行状态。
   for (size_t i = 0; i < updated_new.size(); i++) {
     RC rc2 = trx_->delete_record(table_, updated_new[i]);
     if (OB_FAIL(rc2)) {
