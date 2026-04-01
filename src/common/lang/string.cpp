@@ -18,6 +18,7 @@ See the Mulan PSL v2 for more details. */
 #include <errno.h>
 #include <string.h>
 
+#include <cmath>
 #include <iomanip>
 
 #include "common/log/log.h"
@@ -272,8 +273,15 @@ string double_to_str(double v)
 {
   char buf[256];
   // Compensate tiny float accumulation noise before 2-digit rounding.
-  constexpr double kRoundEpsilon = 1e-5;
-  double rounded_v = round((v - kRoundEpsilon) * 100.0) / 100.0;
+  // Only apply for |v| >= kLargeMagnitudeThreshold: a global epsilon would
+  // shift values near half-cent boundaries (e.g. ~10.125) from 10.13 to 10.12.
+  constexpr double kRoundEpsilon            = 1e-5;
+  constexpr double kLargeMagnitudeThreshold = 100.0;
+  double           adj                      = v;
+  if (std::fabs(v) >= kLargeMagnitudeThreshold) {
+    adj = v - std::copysign(kRoundEpsilon, v);
+  }
+  double rounded_v = std::round(adj * 100.0) / 100.0;
   snprintf(buf, sizeof(buf), "%.2f", rounded_v);
   size_t len = strlen(buf);
   while (buf[len - 1] == '0') {
