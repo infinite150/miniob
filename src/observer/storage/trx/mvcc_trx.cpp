@@ -189,17 +189,10 @@ RC MvccTrx::visit_record(Table *table, Record &record, ReadWriteMode mode)
       LOG_TRACE("record invisible. trx id=%d, begin xid=%d, end xid=%d", trx_id_, begin_xid, end_xid);
       rc = RC::RECORD_INVISIBLE;
     }
-  } else if (begin_xid < 0) {
-    // begin xid 小于0说明是刚插入而且没有提交的数据
-    if (-begin_xid == trx_id_) {
-      rc = RC::SUCCESS;
-    } else {
-      LOG_TRACE("record invisible. someone is updating this record right now. trx id=%d, begin xid=%d, end xid=%d",
-                trx_id_, begin_xid, end_xid);
-      rc = RC::RECORD_INVISIBLE;
-    }
   } else if (end_xid < 0) {
     // end xid 小于0 说明是正在删除但是还没有提交的数据
+    // 须先于 begin_xid<0 判断：同一事务内先 insert 再 delete 时 begin/end 均为负，
+    // 若先按未提交插入处理会误判为可见，导致唯一索引 MVCC 去重失败（如未提交插入后的 UPDATE）。
     if (mode == ReadWriteMode::READ_ONLY) {
       // 如果 -end_xid 就是当前事务的事务号，说明是当前事务删除的
       if (-end_xid != trx_id_) {
@@ -222,6 +215,15 @@ RC MvccTrx::visit_record(Table *table, Record &record, ReadWriteMode mode)
                   trx_id_, begin_xid, end_xid);
         rc = RC::RECORD_INVISIBLE;
       }
+    }
+  } else if (begin_xid < 0) {
+    // begin xid 小于0说明是刚插入而且没有提交的数据
+    if (-begin_xid == trx_id_) {
+      rc = RC::SUCCESS;
+    } else {
+      LOG_TRACE("record invisible. someone is updating this record right now. trx id=%d, begin xid=%d, end xid=%d",
+                trx_id_, begin_xid, end_xid);
+      rc = RC::RECORD_INVISIBLE;
     }
   }
   return rc;
