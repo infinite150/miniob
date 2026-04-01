@@ -42,7 +42,13 @@ RC MvccTrxKit::init()
 
 const vector<FieldMeta> *MvccTrxKit::trx_fields() const { return &fields_; }
 
-int32_t MvccTrxKit::next_trx_id() { return ++current_trx_id_; }
+int32_t MvccTrxKit::next_trx_id()
+{
+  lock_.lock();
+  int32_t trx_id = ++current_trx_id_;
+  lock_.unlock();
+  return trx_id;
+}
 
 int32_t MvccTrxKit::max_trx_id() const { return numeric_limits<int32_t>::max(); }
 
