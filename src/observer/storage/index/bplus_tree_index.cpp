@@ -76,6 +76,20 @@ static bool is_deleted_by_specific_trx(Table *table, const Record &old_record, i
   return end_xid == -trx_id;
 }
 
+static bool is_future_version_for_trx(Table *table, const Record &record, int32_t trx_id)
+{
+  if (table == nullptr || record.data() == nullptr || trx_id <= 0) {
+    return false;
+  }
+  const auto trx_fields = table->table_meta().trx_fields();
+  if (trx_fields.size() < 2) {
+    return false;
+  }
+  const int32_t begin_xid = *reinterpret_cast<const int32_t *>(record.data() + trx_fields[0].offset());
+  const int32_t end_xid   = *reinterpret_cast<const int32_t *>(record.data() + trx_fields[1].offset());
+  return begin_xid > 0 && end_xid > 0 && trx_id < begin_xid;
+}
+
 static bool resolve_session_mvcc_trx_id(int32_t &trx_id)
 {
   Session *session = Session::current_session();
@@ -87,32 +101,48 @@ static bool resolve_session_mvcc_trx_id(int32_t &trx_id)
   return false;
 }
 
-/// 唯一键冲突扫描：若 end_xid 与 trx_id 对不齐，仍用 MVCC 可见性（与旧 Session+visit_record 行为一致）判断是否可清理占位。
 static void classify_mvcc_unique_dup_entry(
     Table *table, Record &dup_record, int32_t trx_id, bool &is_stale_placeholder, bool &is_real_conflict)
 {
   is_stale_placeholder = false;
   is_real_conflict     = false;
-  if (is_deleted_by_specific_trx(table, dup_record, trx_id)) {
+  if (table == nullptr || dup_record.data() == nullptr || trx_id <= 0) {
+    is_real_conflict = true;
+    return;
+  }
+
+  const auto trx_fields = table->table_meta().trx_fields();
+  if (trx_fields.size() < 2) {
+    is_real_conflict = true;
+    return;
+  }
+
+  const int32_t begin_xid = *reinterpret_cast<const int32_t *>(dup_record.data() + trx_fields[0].offset());
+  const int32_t end_xid   = *reinterpret_cast<const int32_t *>(dup_record.data() + trx_fields[1].offset());
+
+  // 仅当前事务自己删除形成的占位可以直接清理。
+  if (end_xid == -trx_id) {
     is_stale_placeholder = true;
     return;
   }
 
-  Session *session = Session::current_session();
-  Trx     *trx     = session != nullptr ? session->current_trx() : nullptr;
-  if (trx != nullptr && trx->type() == TrxKit::Type::MVCC) {
-    RC vrc = trx->visit_record(table, dup_record, ReadWriteMode::READ_ONLY);
-    if (vrc == RC::RECORD_INVISIBLE) {
+  if (begin_xid > 0 && end_xid > 0) {
+    if (trx_id > end_xid) {
+      // 历史已删除版本（对当前事务不可见）可清理其索引占位。
       is_stale_placeholder = true;
       return;
     }
-    if (vrc == RC::SUCCESS) {
-      is_real_conflict = true;
+    if (trx_id < begin_xid) {
+      // 未来版本：在“同键版本交接”(先看到旧版本并删除，再插新版本)场景可作为可清理候选；
+      // 是否真正清理由调用方根据是否存在 self-deleted 占位决定。
+      is_stale_placeholder = true;
       return;
     }
     is_real_conflict = true;
     return;
   }
+
+  // 其它情况（并发事务未提交写入、未来版本、无效版本）统一视为真实冲突，避免误删其它事务索引项。
   is_real_conflict = true;
 }
 
@@ -281,6 +311,7 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 
     bool        has_conflict = false;
     vector<RID> invisible_rids;
+    vector<RID> future_rids;
     RID         dup_rid;
     while (OB_SUCC(scanner->next_entry(&dup_rid))) {
       Record dup_record;
@@ -291,7 +322,7 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 
       bool stale = false;
       bool real_conflict = false;
-      if (have_session_mvcc_trx && is_deleted_by_specific_trx(table_, dup_record, session_trx_id)) {
+      if (is_deleted_by_specific_trx(table_, dup_record, classify_trx_id)) {
         stale = true;
       } else {
         classify_mvcc_unique_dup_entry(table_, dup_record, classify_trx_id, stale, real_conflict);
@@ -301,7 +332,11 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
         break;
       }
       if (stale) {
-        invisible_rids.emplace_back(dup_rid);
+        if (is_future_version_for_trx(table_, dup_record, classify_trx_id)) {
+          future_rids.emplace_back(dup_rid);
+        } else {
+          invisible_rids.emplace_back(dup_rid);
+        }
       }
     }
 
@@ -310,9 +345,10 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
           index_meta_.name(), table_ ? table_->name() : "null", strrc(rc));
       return rc;
     }
-    if (invisible_rids.empty()) {
+    if (invisible_rids.empty() && future_rids.empty()) {
       return rc;
     }
+    invisible_rids.insert(invisible_rids.end(), future_rids.begin(), future_rids.end());
     scanner.reset();
     for (const RID &invisible_rid : invisible_rids) {
       RC drc = index_handler_.delete_entry(record + field_metas_[0].offset(), &invisible_rid, false);
@@ -353,6 +389,7 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 
   bool        has_conflict = false;
   vector<RID> invisible_rids;
+  vector<RID> future_rids;
   RID         dup_rid;
   while (OB_SUCC(scanner->next_entry(&dup_rid))) {
     Record dup_record;
@@ -363,7 +400,7 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 
     bool stale = false;
     bool real_conflict = false;
-    if (have_session_mvcc_trx && is_deleted_by_specific_trx(table_, dup_record, session_trx_id)) {
+    if (is_deleted_by_specific_trx(table_, dup_record, classify_trx_id)) {
       stale = true;
     } else {
       classify_mvcc_unique_dup_entry(table_, dup_record, classify_trx_id, stale, real_conflict);
@@ -373,7 +410,11 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
       break;
     }
     if (stale) {
-      invisible_rids.emplace_back(dup_rid);
+      if (is_future_version_for_trx(table_, dup_record, classify_trx_id)) {
+        future_rids.emplace_back(dup_rid);
+      } else {
+        invisible_rids.emplace_back(dup_rid);
+      }
     }
   }
 
@@ -382,9 +423,10 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
         index_meta_.name(), table_ ? table_->name() : "null", strrc(rc));
     return rc;
   }
-  if (invisible_rids.empty()) {
+  if (invisible_rids.empty() && future_rids.empty()) {
     return rc;
   }
+  invisible_rids.insert(invisible_rids.end(), future_rids.begin(), future_rids.end());
   scanner.reset();
   for (const RID &invisible_rid : invisible_rids) {
     RC drc = index_handler_.delete_entry(key_buf, &invisible_rid, false);
