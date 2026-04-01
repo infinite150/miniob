@@ -317,6 +317,10 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
       Record dup_record;
       RC     grc = table_->get_record(dup_rid, dup_record);
       if (OB_FAIL(grc)) {
+        if (grc == RC::RECORD_NOT_EXIST) {
+          // Dangling index entry: treat as stale placeholder and clean it up.
+          invisible_rids.emplace_back(dup_rid);
+        }
         continue;
       }
 
@@ -395,6 +399,9 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
     Record dup_record;
     RC     grc = table_->get_record(dup_rid, dup_record);
     if (OB_FAIL(grc)) {
+      if (grc == RC::RECORD_NOT_EXIST) {
+        invisible_rids.emplace_back(dup_rid);
+      }
       continue;
     }
 
