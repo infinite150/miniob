@@ -1023,7 +1023,9 @@ RC FunctionExpr::eval_round(const Value &arg, Value &result) const
     return RC::INVALID_ARGUMENT;
   }
   float val = arg.get_float();
-  int rounded = static_cast<int>(roundf(val));
+  // Keep SQL ROUND behavior as banker's rounding (half to even),
+  // e.g. ROUND(8.5) = 8.
+  int rounded = static_cast<int>(nearbyintf(val));
   result.set_int(rounded);
   return RC::SUCCESS;
 }
@@ -1046,7 +1048,7 @@ RC FunctionExpr::eval_round(const Value &arg, const Value &precision_arg, Value 
   }
   float val = arg.get_float();
   float factor = powf(10.0f, static_cast<float>(prec));
-  float rounded = roundf(val * factor) / factor;
+  float rounded = nearbyintf(val * factor) / factor;
   result.set_float(rounded);
   return RC::SUCCESS;
 }
