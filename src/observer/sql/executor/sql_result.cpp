@@ -25,6 +25,7 @@ void SqlResult::set_tuple_schema(const TupleSchema &schema) { tuple_schema_ = sc
 RC SqlResult::open()
 {
   if (nullptr == operator_ || session_ == nullptr) {
+    return_code_ = RC::INVALID_ARGUMENT;
     return RC::INVALID_ARGUMENT;
   }
 
@@ -36,6 +37,7 @@ RC SqlResult::open()
   Session::set_current_session(session_);
   RC rc = operator_->open(trx);
   Session::set_current_session(prev);
+  return_code_ = rc;
   return rc;
 }
 
@@ -51,9 +53,17 @@ RC SqlResult::close()
 
   operator_.reset();
 
+  RC statement_rc = return_code_;
+  if (statement_rc == RC::SUCCESS && rc != RC::SUCCESS) {
+    statement_rc = rc;
+  }
+
   if (session_ && !session_->is_trx_multi_operation_mode()) {
-    if (rc == RC::SUCCESS) {
+    if (statement_rc == RC::SUCCESS) {
       rc = session_->current_trx()->commit();
+      if (rc != RC::SUCCESS) {
+        statement_rc = rc;
+      }
     } else {
       RC rc2 = session_->current_trx()->rollback();
       if (rc2 != RC::SUCCESS) {
@@ -62,7 +72,7 @@ RC SqlResult::close()
     }
     session_->destroy_trx();
   }
-  return rc;
+  return statement_rc;
 }
 
 RC SqlResult::next_tuple(Tuple *&tuple)
