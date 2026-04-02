@@ -86,6 +86,8 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
         CREATE
         DROP
         GROUP
+        ORDER
+        ASC
         TABLE
         TABLES
         INDEX
@@ -175,6 +177,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
   float                                      floats;
   vector<std::pair<string, Expression *>> *    update_assign_list;
   vector<vector<Value> *> *                   value_list_groups;
+  OrderByParseResult *                       order_by_parse_result;
 }
 
 %destructor { if ($$) { for (auto *p : *$$) delete p; delete $$; } } <value_list_groups>
@@ -200,6 +203,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
 %destructor { delete $$; } <inner_join_node>
 %destructor { delete $$; } <inner_join_list>
 %destructor { delete $$; } <on_condition>
+%destructor { delete $$; } <order_by_parse_result>
 
 %token <number> NUMBER
 %token <floats> FLOAT
@@ -242,6 +246,9 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
 %type <expression>          select_expr
 %type <expression_list>     group_by_list
 %type <expression_list>     group_by
+%type <order_by_parse_result> order_by_clause
+%type <order_by_parse_result> order_by_list
+%type <order_by_parse_result> order_by_item
 %type <cstring>             fields_terminated_by
 %type <cstring>             enclosed_by
 %type <sql_node>            calc_stmt
@@ -643,7 +650,7 @@ update_list:
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT select_expr_list FROM from_node from_list where_expr group_by
+    SELECT select_expr_list FROM from_node from_list where_expr group_by order_by_clause
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
@@ -669,6 +676,11 @@ select_stmt:        /*  select 语句的语法解析树*/
       if ($7 != nullptr) {
         $$->selection.group_by.swap(*$7);
         delete $7;
+      }
+      if ($8 != nullptr) {
+        $$->selection.order_by_exprs.swap($8->exprs);
+        $$->selection.order_by_asc.swap($8->asc);
+        delete $8;
       }
     }
     | SELECT select_expr_list
@@ -1155,6 +1167,53 @@ group_by:
       $$ = $3;
     }
     ;
+
+order_by_item:
+    expression
+    {
+      $$ = new OrderByParseResult;
+      $$->exprs.emplace_back(unique_ptr<Expression>($1));
+      $$->asc.push_back(true);
+    }
+    | expression ASC
+    {
+      $$ = new OrderByParseResult;
+      $$->exprs.emplace_back(unique_ptr<Expression>($1));
+      $$->asc.push_back(true);
+    }
+    | expression DESC
+    {
+      $$ = new OrderByParseResult;
+      $$->exprs.emplace_back(unique_ptr<Expression>($1));
+      $$->asc.push_back(false);
+    }
+    ;
+
+order_by_list:
+    order_by_item
+    {
+      $$ = $1;
+    }
+    | order_by_list COMMA order_by_item
+    {
+      $$ = $1;
+      $$->exprs.push_back(std::move($3->exprs[0]));
+      $$->asc.push_back($3->asc[0]);
+      delete $3;
+    }
+    ;
+
+order_by_clause:
+    /* empty */
+    {
+      $$ = nullptr;
+    }
+    | ORDER BY order_by_list
+    {
+      $$ = $3;
+    }
+    ;
+
 load_data_stmt:
     LOAD DATA INFILE SSS INTO TABLE ID fields_terminated_by enclosed_by
     {

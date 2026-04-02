@@ -106,6 +106,15 @@ struct InnerJoinSqlNode
 };
 
 /**
+ * @brief ORDER BY 解析中间结构（yacc 使用）
+ */
+struct OrderByParseResult
+{
+  vector<unique_ptr<Expression>> exprs;
+  vector<bool>                   asc;
+};
+
+/**
  * @brief 描述一个select语句
  * @ingroup SQLParser
  * @details 一个正常的select语句描述起来比这个要复杂很多，这里做了简化。
@@ -123,6 +132,8 @@ struct SelectSqlNode
   vector<ConditionSqlNode>       conditions;  ///< WHERE 查询条件（简单条件，用于兼容）
   Expression *                   condition_expr = nullptr;  ///< WHERE 表达式条件（支持子查询）
   vector<unique_ptr<Expression>> group_by;    ///< group by clause
+  vector<unique_ptr<Expression>> order_by_exprs;  ///< order by 表达式
+  vector<bool>                   order_by_asc;    ///< 与 order_by_exprs 等长，true=ASC
 };
 
 /**

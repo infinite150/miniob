@@ -23,6 +23,7 @@ See the Mulan PSL v2 for more details. */
 #include "event/session_event.h"
 #include "event/sql_event.h"
 #include "sql/operator/logical_operator.h"
+#include "sql/operator/order_by_logical_operator.h"
 #include "sql/operator/table_get_logical_operator.h"
 #include "sql/stmt/stmt.h"
 #include "sql/expr/expression_iterator.h"
@@ -47,6 +48,15 @@ static bool plan_has_subquery(LogicalOperator *oper)
   if (oper->type() == LogicalOperatorType::TABLE_GET) {
     auto *tget = static_cast<TableGetLogicalOperator *>(oper);
     for (auto &expr : tget->predicates()) {
+      if (expr) {
+        ExpressionIterator::for_each_subquery(*expr, mark_found);
+        if (found) return true;
+      }
+    }
+  }
+  if (oper->type() == LogicalOperatorType::ORDER_BY) {
+    auto *ob = static_cast<OrderByLogicalOperator *>(oper);
+    for (auto &expr : ob->order_exprs()) {
       if (expr) {
         ExpressionIterator::for_each_subquery(*expr, mark_found);
         if (found) return true;
