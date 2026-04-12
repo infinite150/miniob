@@ -17,6 +17,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/field/field.h"
 #include "storage/trx/mvcc_trx_log.h"
 #include "common/lang/algorithm.h"
+#include <cstring>
 #include <unistd.h>
 
 MvccTrxKit::~MvccTrxKit()
@@ -190,6 +191,68 @@ RC MvccTrx::delete_record(Table *table, Record &record)
 
   operations_.push_back(Operation(Operation::Type::DELETE, table, record.rid()));
 
+  return RC::SUCCESS;
+}
+
+RC MvccTrx::rollback_delete_for_statement(Table *table, const Record &old_record)
+{
+  if (table == nullptr || old_record.data() == nullptr) {
+    return RC::INVALID_ARGUMENT;
+  }
+
+  auto delete_op_iter = operations_.end();
+  for (auto iter = operations_.end(); iter != operations_.begin();) {
+    --iter;
+    if (iter->type() == Operation::Type::DELETE && iter->table() == table
+        && iter->page_num() == old_record.rid().page_num && iter->slot_num() == old_record.rid().slot_num) {
+      delete_op_iter = iter;
+      break;
+    }
+  }
+
+  if (delete_op_iter == operations_.end()) {
+    // Some statement-compensation paths may not retain the DELETE operation.
+    // Best effort: restore bytes in-place; this is idempotent if already restored.
+    bool restored = true;
+    RC   rc       = table->visit_record(old_record.rid(), [&old_record, &restored](Record &record) -> bool {
+      if (record.len() != old_record.len()) {
+        restored = false;
+        return false;
+      }
+      memcpy(record.data(), old_record.data(), old_record.len());
+      return true;
+    });
+
+    if (OB_SUCC(rc) && restored) {
+      return RC::SUCCESS;
+    }
+
+    LOG_WARN("failed to compensate statement rollback without delete operation. table=%s rid=%s trx_id=%d check_rc=%s",
+        table->name(), old_record.rid().to_string().c_str(), trx_id_, strrc(rc));
+    return RC::INTERNAL;
+  }
+
+  bool restored = true;
+  RC   rc       = table->visit_record(old_record.rid(), [&old_record, &restored](Record &record) -> bool {
+    if (record.len() != old_record.len()) {
+      restored = false;
+      return false;
+    }
+    memcpy(record.data(), old_record.data(), old_record.len());
+    return true;
+  });
+  if (OB_FAIL(rc)) {
+    LOG_WARN("failed to restore deleted record while compensating statement rollback. table=%s rid=%s rc=%s",
+        table->name(), old_record.rid().to_string().c_str(), strrc(rc));
+    return rc;
+  }
+  if (!restored) {
+    LOG_WARN("failed to restore deleted record due length mismatch. table=%s rid=%s old_len=%d",
+        table->name(), old_record.rid().to_string().c_str(), old_record.len());
+    return RC::INTERNAL;
+  }
+
+  operations_.erase(delete_op_iter);
   return RC::SUCCESS;
 }
 

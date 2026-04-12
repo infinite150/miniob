@@ -18,6 +18,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/expr/expression.h"
 #include "sql/expr/expression_iterator.h"
 #include "storage/table/table.h"
+#include "storage/trx/mvcc_trx.h"
 #include "storage/trx/trx.h"
 #include "sql/expr/tuple.h"
 
@@ -107,9 +108,18 @@ RC UpdatePhysicalOperator::open(Trx *trx)
     return rc;
   }
 
-  vector<Record> updated_new;
-  // 已成功 delete 旧记录的数量（用于失败回滚时避免对未删除行重复插入）
-  size_t         deleted_old_count = 0;
+  auto copy_record_with_rid = [](const Record &src, Record &dst) -> RC {
+    RC rc = dst.copy_data(src.data(), src.len());
+    if (OB_FAIL(rc)) {
+      return rc;
+    }
+    dst.set_rid(src.rid());
+    return RC::SUCCESS;
+  };
+
+  // Keep statement-local bookkeeping for rollback; do not infer via index math.
+  vector<Record> inserted_new_records;
+  vector<Record> deleted_old_records;
   for (Record &old_record : old_records) {
     Record new_record;
     rc = build_new_record(old_record, new_record);
@@ -118,46 +128,79 @@ RC UpdatePhysicalOperator::open(Trx *trx)
           table_ ? table_->name() : "null", old_record.rid().to_string().c_str(), strrc(rc));
       goto rollback;
     }
+
     rc = trx_->delete_record(table_, old_record);
     if (OB_FAIL(rc)) {
       LOG_WARN("UpdatePhysicalOperator::open failed at trx_->delete_record. table=%s rid=%s rc=%s",
           table_ ? table_->name() : "null", old_record.rid().to_string().c_str(), strrc(rc));
       goto rollback;
     }
-    deleted_old_count++;
+
+    deleted_old_records.emplace_back();
+    rc = copy_record_with_rid(old_record, deleted_old_records.back());
+    if (OB_FAIL(rc)) {
+      LOG_WARN("failed to copy old record after delete. table=%s rid=%s rc=%s",
+          table_ ? table_->name() : "null", old_record.rid().to_string().c_str(), strrc(rc));
+      goto rollback;
+    }
+
     rc = trx_->insert_record(table_, new_record);
     if (OB_FAIL(rc)) {
       LOG_WARN("UpdatePhysicalOperator::open failed at trx_->insert_record. table=%s old_rid=%s rc=%s",
           table_ ? table_->name() : "null", old_record.rid().to_string().c_str(), strrc(rc));
       goto rollback;
     }
-    updated_new.emplace_back();
-    updated_new.back().copy_data(new_record.data(), new_record.len());
-    updated_new.back().set_rid(new_record.rid());
+
+    inserted_new_records.emplace_back();
+    rc = copy_record_with_rid(new_record, inserted_new_records.back());
+    if (OB_FAIL(rc)) {
+      LOG_WARN("failed to copy new record after insert. table=%s rid=%s rc=%s",
+          table_ ? table_->name() : "null", new_record.rid().to_string().c_str(), strrc(rc));
+      goto rollback;
+    }
   }
 
   return RC::SUCCESS;
 
 rollback:
-  // 语句失败时要做语句级补偿，特别是显式事务(BEGIN)场景下外层不会自动 rollback。
-  // 这里统一走补偿逻辑，把当前语句已完成的改动回退，避免事务内后续语句读到半执行状态。
-  for (size_t i = 0; i < updated_new.size(); i++) {
-    RC rc2 = trx_->delete_record(table_, updated_new[i]);
-    if (OB_FAIL(rc2)) {
-      LOG_ERROR("rollback: failed to delete new record. rc=%s", strrc(rc2));
+  // Statement-level compensation for explicit transactions:
+  // rollback only changes done by this UPDATE statement.
+  MvccTrx *mvcc_trx = nullptr;
+  if (trx_ != nullptr && trx_->type() == TrxKit::Type::MVCC) {
+    mvcc_trx = static_cast<MvccTrx *>(trx_);
+  }
+
+  auto rollback_old_record = [this, mvcc_trx](Record &old_record, const char *context) {
+    if (mvcc_trx != nullptr) {
+      RC rc2 = mvcc_trx->rollback_delete_for_statement(table_, old_record);
+      if (OB_FAIL(rc2)) {
+        LOG_ERROR("rollback: failed to restore old record in mvcc. context=%s rid=%s rc=%s",
+            context, old_record.rid().to_string().c_str(), strrc(rc2));
+      }
+      return;
     }
-    rc2 = trx_->insert_record(table_, old_records[i]);
+
+    RC rc2 = trx_->insert_record(table_, old_record);
+    if (OB_SUCC(rc2)) {
+      return;
+    }
+
+    LOG_ERROR("rollback: failed to restore old record. context=%s rid=%s rc=%s",
+        context, old_record.rid().to_string().c_str(), strrc(rc2));
+  };
+
+  for (auto iter = inserted_new_records.rbegin(); iter != inserted_new_records.rend(); ++iter) {
+    RC rc2 = trx_->delete_record(table_, *iter);
     if (OB_FAIL(rc2)) {
-      LOG_ERROR("rollback: failed to re-insert old record. rc=%s", strrc(rc2));
+      LOG_ERROR("rollback: failed to delete new record. rid=%s rc=%s",
+          iter->rid().to_string().c_str(), strrc(rc2));
     }
   }
-  // 只恢复“已删除但尚未插入新行”的旧记录，未删除的旧记录不能重复插入。
-  for (size_t i = updated_new.size(); i < deleted_old_count; i++) {
-    RC rc2 = trx_->insert_record(table_, old_records[i]);
-    if (OB_FAIL(rc2)) {
-      LOG_ERROR("rollback: failed to re-insert old record (deleted but not inserted). rc=%s", strrc(rc2));
-    }
+
+  for (auto iter = deleted_old_records.rbegin(); iter != deleted_old_records.rend(); ++iter) {
+    rollback_old_record(*iter, "restore-deleted-old");
   }
+
   return rc;
 }
 

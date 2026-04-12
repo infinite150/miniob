@@ -74,6 +74,11 @@ public:
   RC insert_record(Table *table, Record &record) override;
   RC delete_record(Table *table, Record &record) override;
   RC update_record(Table *table, Record &old_record, Record &new_record) override { return RC::UNIMPLEMENTED; };
+  /**
+   * @brief Statement-level compensation for UPDATE failure:
+   *        restore a deleted old row in-place and remove the matching DELETE operation.
+   */
+  RC rollback_delete_for_statement(Table *table, const Record &old_record);
 
   /**
    * @brief 当访问到某条数据时，使用此函数来判断是否可见，或者是否有访问冲突
