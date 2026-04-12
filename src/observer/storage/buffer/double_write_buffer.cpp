@@ -12,6 +12,7 @@ See the Mulan PSL v2 for more details. */
 // Created by Wenbin1002 on 2024/04/16
 //
 #include <fcntl.h>
+#include <unistd.h>
 
 #include "storage/buffer/double_write_buffer.h"
 #include "storage/buffer/disk_buffer_pool.h"
@@ -75,7 +76,14 @@ RC DiskDoubleWriteBuffer::open_file(const char *filename)
 
 RC DiskDoubleWriteBuffer::flush_page()
 {
-  sync();
+  // Avoid global OS sync here. During startup/recovery we only need to manage
+  // this double-write file and related pages, and global sync can block
+  // startup for a very long time.
+  if (file_desc_ >= 0) {
+    if (::fsync(file_desc_) != 0) {
+      LOG_WARN("fsync double write file failed. fd=%d errno=%d:%s", file_desc_, errno, strerror(errno));
+    }
+  }
 
   for (const auto &pair : dblwr_pages_) {
     RC rc = write_page(pair.second);
