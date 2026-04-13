@@ -90,6 +90,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
         ASC
         TABLE
         TABLES
+        VIEW
         INDEX
         CALC
         SELECT
@@ -257,7 +258,9 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
 %type <sql_node>            update_stmt
 %type <sql_node>            delete_stmt
 %type <sql_node>            create_table_stmt
+%type <sql_node>            create_view_stmt
 %type <sql_node>            drop_table_stmt
+%type <sql_node>            drop_view_stmt
 %type <sql_node>            analyze_table_stmt
 %type <sql_node>            show_tables_stmt
 %type <sql_node>            desc_table_stmt
@@ -299,7 +302,9 @@ command_wrapper:
   | update_stmt
   | delete_stmt
   | create_table_stmt
+  | create_view_stmt
   | drop_table_stmt
+  | drop_view_stmt
   | analyze_table_stmt
   | show_tables_stmt
   | desc_table_stmt
@@ -356,6 +361,13 @@ drop_table_stmt:    /*drop table 语句的语法解析树*/
       $$ = new ParsedSqlNode(SCF_DROP_TABLE);
       $$->drop_table.relation_name = $3;
     };
+
+drop_view_stmt:
+    DROP VIEW ID {
+      $$ = new ParsedSqlNode(SCF_DROP_VIEW);
+      $$->drop_view.view_name = $3;
+    }
+    ;
 
 analyze_table_stmt:  /* analyze table 语法的语法解析树*/
     ANALYZE TABLE ID {
@@ -430,6 +442,28 @@ create_table_stmt:    /*create table 语句的语法解析树*/
       if ($8 != nullptr) {
         create_table.storage_format = $8;
       }
+    }
+    ;
+
+create_view_stmt:
+    CREATE VIEW ID AS select_stmt
+    {
+      $$ = new ParsedSqlNode(SCF_CREATE_VIEW);
+      $$->create_view.view_name = $3;
+      $$->create_view.select_sql = token_name(sql_string, &@5);
+      $$->create_view.column_names.clear();
+      delete $5;
+    }
+    | CREATE VIEW ID LBRACE attr_list RBRACE AS select_stmt
+    {
+      $$ = new ParsedSqlNode(SCF_CREATE_VIEW);
+      $$->create_view.view_name = $3;
+      $$->create_view.select_sql = token_name(sql_string, &@8);
+      if ($5 != nullptr) {
+        $$->create_view.column_names.swap(*$5);
+        delete $5;
+      }
+      delete $8;
     }
     ;
     

@@ -17,6 +17,7 @@ See the Mulan PSL v2 for more details. */
 #include <fcntl.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <fstream>
 
 #include "common/lang/string.h"
 #include "common/log/log.h"
@@ -28,8 +29,13 @@ See the Mulan PSL v2 for more details. */
 #include "storage/trx/trx.h"
 #include "storage/clog/disk_log_handler.h"
 #include "storage/clog/integrated_log_replayer.h"
+#include "json/json.h"
 
 using namespace common;
+
+static const Json::StaticString FIELD_VIEW_NAME("view_name");
+static const Json::StaticString FIELD_VIEW_COLUMNS("columns");
+static const Json::StaticString FIELD_VIEW_SELECT_SQL("select_sql");
 
 Db::~Db()
 {
@@ -135,6 +141,12 @@ RC Db::init(const char *name, const char *dbpath, const char *trx_kit_name, cons
     return rc;
   }
 
+  rc = open_all_views();
+  if (OB_FAIL(rc)) {
+    LOG_WARN("failed to open all views. dbpath=%s, rc=%s", dbpath, strrc(rc));
+    return rc;
+  }
+
   rc = init_dblwr_buffer();
   if (OB_FAIL(rc)) {
     LOG_WARN("failed to init dblwr buffer. rc = %s", strrc(rc));
@@ -157,6 +169,10 @@ RC Db::create_table(const char *table_name, span<const AttrInfoSqlNode> attribut
   // check table_name
   if (opened_tables_.count(table_name) != 0) {
     LOG_WARN("%s has been opened before.", table_name);
+    return RC::SCHEMA_TABLE_EXIST;
+  }
+  if (find_view(table_name) != nullptr) {
+    LOG_WARN("%s has been used as view name.", table_name);
     return RC::SCHEMA_TABLE_EXIST;
   }
 
@@ -250,6 +266,98 @@ RC Db::drop_table(const char *table_name)
   return RC::SUCCESS;
 }
 
+RC Db::create_view(const char *view_name, const vector<string> &column_names, const char *select_sql)
+{
+  if (common::is_blank(view_name) || common::is_blank(select_sql)) {
+    LOG_WARN("invalid argument for create view. view_name=%s", view_name);
+    return RC::INVALID_ARGUMENT;
+  }
+  if (opened_tables_.count(view_name) != 0 || find_table(view_name) != nullptr) {
+    LOG_WARN("table with same name already exists. name=%s", view_name);
+    return RC::SCHEMA_TABLE_EXIST;
+  }
+  if (find_view(view_name) != nullptr) {
+    LOG_WARN("view with same name already exists. name=%s", view_name);
+    return RC::SCHEMA_TABLE_EXIST;
+  }
+
+  ViewMeta view_meta;
+  view_meta.name         = view_name;
+  view_meta.column_names = column_names;
+  view_meta.select_sql   = select_sql;
+
+  Json::Value root;
+  root[FIELD_VIEW_NAME]       = view_meta.name;
+  root[FIELD_VIEW_SELECT_SQL] = view_meta.select_sql;
+  Json::Value columns_value;
+  for (const string &column : view_meta.column_names) {
+    columns_value.append(column);
+  }
+  root[FIELD_VIEW_COLUMNS] = std::move(columns_value);
+
+  Json::StreamWriterBuilder builder;
+  string                    content = Json::writeString(builder, root);
+
+  filesystem::path meta_path      = view_meta_file(path_.c_str(), view_name);
+  filesystem::path temp_meta_path = meta_path;
+  temp_meta_path += ".tmp";
+
+  std::ofstream ofs(temp_meta_path, std::ios::out | std::ios::trunc);
+  if (!ofs.is_open()) {
+    LOG_WARN("failed to open view meta temp file. file=%s", temp_meta_path.c_str());
+    return RC::IOERR_WRITE;
+  }
+  ofs << content;
+  ofs.close();
+
+  error_code ec;
+  filesystem::rename(temp_meta_path, meta_path, ec);
+  if (ec) {
+    LOG_WARN("failed to rename view meta file. tmp=%s, target=%s, err=%s",
+        temp_meta_path.c_str(),
+        meta_path.c_str(),
+        ec.message().c_str());
+    return RC::IOERR_WRITE;
+  }
+
+  opened_views_[view_meta.name] = std::move(view_meta);
+  LOG_INFO("Create view success. view name=%s", view_name);
+  return RC::SUCCESS;
+}
+
+RC Db::drop_view(const char *view_name)
+{
+  if (common::is_blank(view_name)) {
+    LOG_WARN("invalid view name for drop view");
+    return RC::INVALID_ARGUMENT;
+  }
+
+  auto iter = opened_views_.find(view_name);
+  if (iter == opened_views_.end()) {
+    // case-insensitive fallback
+    for (auto it = opened_views_.begin(); it != opened_views_.end(); ++it) {
+      if (0 == strcasecmp(view_name, it->first.c_str())) {
+        iter = it;
+        break;
+      }
+    }
+  }
+  if (iter == opened_views_.end()) {
+    LOG_WARN("view not exist. name=%s", view_name);
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+
+  filesystem::path meta_file = view_meta_file(path_.c_str(), iter->second.name.c_str());
+  if (filesystem::exists(meta_file) && !filesystem::remove(meta_file)) {
+    LOG_WARN("failed to remove view meta file. file=%s", meta_file.c_str());
+    return RC::IOERR_DELETE;
+  }
+
+  opened_views_.erase(iter);
+  LOG_INFO("Drop view success. view name=%s", view_name);
+  return RC::SUCCESS;
+}
+
 Table *Db::find_table(const char *table_name) const
 {
   unordered_map<string, Table *>::const_iterator iter = opened_tables_.find(table_name);
@@ -270,6 +378,23 @@ Table *Db::find_table(int32_t table_id) const
   for (auto pair : opened_tables_) {
     if (pair.second->table_id() == table_id) {
       return pair.second;
+    }
+  }
+  return nullptr;
+}
+
+const ViewMeta *Db::find_view(const char *view_name) const
+{
+  if (common::is_blank(view_name)) {
+    return nullptr;
+  }
+  auto iter = opened_views_.find(view_name);
+  if (iter != opened_views_.end()) {
+    return &iter->second;
+  }
+  for (const auto &pair : opened_views_) {
+    if (0 == strcasecmp(view_name, pair.first.c_str())) {
+      return &pair.second;
     }
   }
   return nullptr;
@@ -314,12 +439,76 @@ RC Db::open_all_tables()
   return rc;
 }
 
+RC Db::open_all_views()
+{
+  vector<string> view_meta_files;
+
+  int ret = list_file(path_.c_str(), VIEW_META_FILE_PATTERN, view_meta_files);
+  if (ret < 0) {
+    LOG_ERROR("Failed to list view meta files under %s.", path_.c_str());
+    return RC::IOERR_READ;
+  }
+
+  for (const string &filename : view_meta_files) {
+    filesystem::path file_path = filesystem::path(path_) / filename;
+    std::ifstream    ifs(file_path, std::ios::in);
+    if (!ifs.is_open()) {
+      LOG_ERROR("failed to open view meta file. file=%s", file_path.c_str());
+      return RC::IOERR_READ;
+    }
+
+    Json::Value              root;
+    Json::CharReaderBuilder  builder;
+    JSONCPP_STRING           errs;
+    bool                     ok = Json::parseFromStream(builder, ifs, &root, &errs);
+    if (!ok) {
+      LOG_ERROR("failed to parse view meta json. file=%s, err=%s", file_path.c_str(), errs.c_str());
+      return RC::JSON_PARSE_FAILED;
+    }
+
+    if (!root.isMember(FIELD_VIEW_NAME) || !root.isMember(FIELD_VIEW_SELECT_SQL) ||
+        !root.isMember(FIELD_VIEW_COLUMNS)) {
+      LOG_ERROR("invalid view meta file. file=%s", file_path.c_str());
+      return RC::JSON_MEMBER_MISSING;
+    }
+
+    ViewMeta view_meta;
+    view_meta.name       = root[FIELD_VIEW_NAME].asString();
+    view_meta.select_sql = root[FIELD_VIEW_SELECT_SQL].asString();
+    const Json::Value &columns = root[FIELD_VIEW_COLUMNS];
+    if (!columns.isArray()) {
+      LOG_ERROR("invalid columns in view meta. file=%s", file_path.c_str());
+      return RC::JSON_PARSE_FAILED;
+    }
+    for (Json::ArrayIndex i = 0; i < columns.size(); i++) {
+      view_meta.column_names.emplace_back(columns[i].asString());
+    }
+
+    if (find_table(view_meta.name.c_str()) != nullptr) {
+      LOG_ERROR("view name conflicts with table. name=%s", view_meta.name.c_str());
+      return RC::SCHEMA_TABLE_EXIST;
+    }
+    if (opened_views_.count(view_meta.name) != 0) {
+      LOG_ERROR("duplicate view meta. name=%s, file=%s", view_meta.name.c_str(), file_path.c_str());
+      return RC::SCHEMA_TABLE_EXIST;
+    }
+    opened_views_[view_meta.name] = std::move(view_meta);
+    LOG_INFO("Open view: %s, file: %s", filename.c_str(), file_path.c_str());
+  }
+
+  LOG_INFO("All views have been opened. num=%d", opened_views_.size());
+  return RC::SUCCESS;
+}
+
 const char *Db::name() const { return name_.c_str(); }
 
 void Db::all_tables(vector<string> &table_names) const
 {
   for (const auto &table_item : opened_tables_) {
     table_names.emplace_back(table_item.first);
+  }
+  for (const auto &view_item : opened_views_) {
+    table_names.emplace_back(view_item.first);
   }
 }
 

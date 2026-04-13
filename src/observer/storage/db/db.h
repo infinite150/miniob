@@ -31,6 +31,13 @@ class LogHandler;
 class BufferPoolManager;
 class TrxKit;
 
+struct ViewMeta
+{
+  string         name;
+  vector<string> column_names;
+  string         select_sql;
+};
+
 /**
  * @brief 一个DB实例负责管理一批表
  * @details 当前DB的存储模式很简单，一个DB对应一个目录，所有的表和数据都放置在这个目录下。
@@ -74,6 +81,8 @@ public:
    * @brief 删除一个表，释放内存并清理磁盘上的相关文件
    */
   RC drop_table(const char *table_name);
+  RC create_view(const char *view_name, const vector<string> &column_names, const char *select_sql);
+  RC drop_view(const char *view_name);
 
   /**
    * @brief 根据表名查找表
@@ -83,6 +92,7 @@ public:
    * @brief 根据表ID查找表
    */
   Table *find_table(int32_t table_id) const;
+  const ViewMeta *find_view(const char *view_name) const;
 
   /// @brief 当前数据库的名称
   const char *name() const;
@@ -112,6 +122,7 @@ public:
 private:
   /// @brief 打开所有的表。在数据库初始化的时候会执行
   RC open_all_tables();
+  RC open_all_views();
   /// @brief 恢复数据。在数据库初始化的时候运行。
   RC recover();
 
@@ -142,6 +153,7 @@ private:
   string                         name_;                 ///< 数据库名称
   string                         path_;                 ///< 数据库文件存放的目录
   unordered_map<string, Table *> opened_tables_;        ///< 当前所有打开的表
+  unordered_map<string, ViewMeta> opened_views_;        ///< loaded views
   unique_ptr<BufferPoolManager>  buffer_pool_manager_;  ///< 当前数据库的buffer pool管理器
   unique_ptr<LogHandler>         log_handler_;          ///< 当前数据库的日志处理器
   unique_ptr<TrxKit>             trx_kit_;              ///< 当前数据库的事务管理器

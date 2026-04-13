@@ -212,6 +212,26 @@ struct CreateTableSqlNode
 };
 
 /**
+ * @brief 描述一个create view语句
+ * @ingroup SQLParser
+ */
+struct CreateViewSqlNode
+{
+  string         view_name;     ///< View name
+  vector<string> column_names;  ///< Optional explicit column names
+  string         select_sql;    ///< SQL text after AS
+};
+
+/**
+ * @brief 描述一个drop view语句
+ * @ingroup SQLParser
+ */
+struct DropViewSqlNode
+{
+  string view_name;  ///< View name to drop
+};
+
+/**
  * @brief 描述一个drop table语句
  * @ingroup SQLParser
  */
@@ -326,7 +346,9 @@ enum SqlCommandFlag
   SCF_UPDATE,
   SCF_DELETE,
   SCF_CREATE_TABLE,
+  SCF_CREATE_VIEW,
   SCF_DROP_TABLE,
+  SCF_DROP_VIEW,
   SCF_ANALYZE_TABLE,
   SCF_CREATE_INDEX,
   SCF_DROP_INDEX,
@@ -358,7 +380,9 @@ public:
   DeleteSqlNode       deletion;
   UpdateSqlNode       update;
   CreateTableSqlNode  create_table;
+  CreateViewSqlNode   create_view;
   DropTableSqlNode    drop_table;
+  DropViewSqlNode     drop_view;
   AnalyzeTableSqlNode analyze_table;
   CreateIndexSqlNode  create_index;
   DropIndexSqlNode    drop_index;
