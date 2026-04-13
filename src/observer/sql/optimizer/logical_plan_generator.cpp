@@ -372,7 +372,10 @@ RC LogicalPlanGenerator::create_plan(UpdateStmt *update_stmt, unique_ptr<Logical
   Table      *table       = update_stmt->table();
   FilterStmt *filter_stmt = update_stmt->filter_stmt();
 
-  unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_WRITE));
+  // For UPDATE, only locate candidate rows in scan phase. Row-level write conflict should be
+  // checked when executing delete_record/insert_record on matched rows, instead of failing on
+  // unrelated in-flight rows encountered during scan.
+  unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_ONLY));
 
   unique_ptr<LogicalOperator> predicate_oper;
   RC rc = create_plan(filter_stmt, predicate_oper);
