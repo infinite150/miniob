@@ -267,30 +267,11 @@ RC MvccTrx::visit_record(Table *table, Record &record, ReadWriteMode mode)
 
   RC rc = RC::SUCCESS;
   if (begin_xid > 0 && end_xid > 0) {
-    if (mode == ReadWriteMode::READ_ONLY) {
-      // MVCC snapshot visibility: [begin_xid, end_xid)
-      if (trx_id_ >= begin_xid && trx_id_ < end_xid) {
-        rc = RC::SUCCESS;
-      } else {
-        LOG_TRACE("record invisible. trx id=%d, begin xid=%d, end xid=%d", trx_id_, begin_xid, end_xid);
-        rc = RC::RECORD_INVISIBLE;
-      }
+    if (trx_id_ >= begin_xid && trx_id_ <= end_xid) {
+      rc = RC::SUCCESS;
     } else {
-      // WRITE must target latest visible version.
-      // If end_xid is a committed xid (> trx_id_), another committed txn has
-      // already deleted/updated this version after our snapshot; report conflict.
-      if (trx_id_ < begin_xid) {
-        LOG_TRACE("record invisible for write. trx id=%d, begin xid=%d, end xid=%d", trx_id_, begin_xid, end_xid);
-        rc = RC::RECORD_INVISIBLE;
-      } else if (end_xid == trx_kit_.max_trx_id()) {
-        rc = RC::SUCCESS;
-      } else if (trx_id_ < end_xid) {
-        LOG_TRACE("write conflict on stale version. trx id=%d, begin xid=%d, end xid=%d", trx_id_, begin_xid, end_xid);
-        rc = RC::LOCKED_CONCURRENCY_CONFLICT;
-      } else {
-        LOG_TRACE("record already deleted before trx start. trx id=%d, begin xid=%d, end xid=%d", trx_id_, begin_xid, end_xid);
-        rc = RC::RECORD_INVISIBLE;
-      }
+      LOG_TRACE("record invisible. trx id=%d, begin xid=%d, end xid=%d", trx_id_, begin_xid, end_xid);
+      rc = RC::RECORD_INVISIBLE;
     }
   } else if (end_xid < 0) {
     // end xid 小于0 说明是正在删除但是还没有提交的数据

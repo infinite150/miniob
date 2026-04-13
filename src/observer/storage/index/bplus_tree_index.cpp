@@ -312,7 +312,6 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
     bool        has_conflict = false;
     vector<RID> invisible_rids;
     vector<RID> future_rids;
-    bool        has_self_deleted_placeholder = false;
     RID         dup_rid;
     while (OB_SUCC(scanner->next_entry(&dup_rid))) {
       Record dup_record;
@@ -329,7 +328,6 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
       bool real_conflict = false;
       if (is_deleted_by_specific_trx(table_, dup_record, classify_trx_id)) {
         stale = true;
-        has_self_deleted_placeholder = true;
       } else {
         classify_mvcc_unique_dup_entry(table_, dup_record, classify_trx_id, stale, real_conflict);
       }
@@ -348,13 +346,6 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 
     if (has_conflict) {
       LOG_WARN("unique index duplicate during mvcc update. index=%s table=%s rc=%s",
-          index_meta_.name(), table_ ? table_->name() : "null", strrc(rc));
-      return rc;
-    }
-    // Future committed versions should block insertion unless this trx already deleted
-    // the previous same-key version in this statement.
-    if (!future_rids.empty() && !has_self_deleted_placeholder) {
-      LOG_WARN("unique index duplicate due future committed version. index=%s table=%s rc=%s",
           index_meta_.name(), table_ ? table_->name() : "null", strrc(rc));
       return rc;
     }
@@ -403,7 +394,6 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
   bool        has_conflict = false;
   vector<RID> invisible_rids;
   vector<RID> future_rids;
-  bool        has_self_deleted_placeholder = false;
   RID         dup_rid;
   while (OB_SUCC(scanner->next_entry(&dup_rid))) {
     Record dup_record;
@@ -419,7 +409,6 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
     bool real_conflict = false;
     if (is_deleted_by_specific_trx(table_, dup_record, classify_trx_id)) {
       stale = true;
-      has_self_deleted_placeholder = true;
     } else {
       classify_mvcc_unique_dup_entry(table_, dup_record, classify_trx_id, stale, real_conflict);
     }
@@ -438,11 +427,6 @@ RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 
   if (has_conflict) {
     LOG_WARN("unique index duplicate during mvcc update. index=%s table=%s rc=%s",
-        index_meta_.name(), table_ ? table_->name() : "null", strrc(rc));
-    return rc;
-  }
-  if (!future_rids.empty() && !has_self_deleted_placeholder) {
-    LOG_WARN("unique index duplicate due future committed version. index=%s table=%s rc=%s",
         index_meta_.name(), table_ ? table_->name() : "null", strrc(rc));
     return rc;
   }
