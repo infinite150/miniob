@@ -759,6 +759,9 @@ RC MysqlCommunicator::write_result(SessionEvent *event, bool &need_disconnect)
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_query_response_text_resultset.html
     RC rc = sql_result->open();
     if (rc != RC::SUCCESS) {
+      // Keep behavior consistent with plain protocol path:
+      // ensure statement-level cleanup (auto-trx rollback/destroy) happens on open failure.
+      sql_result->close();
       sql_result->set_return_code(rc);
       return write_state(event, need_disconnect);
     }
