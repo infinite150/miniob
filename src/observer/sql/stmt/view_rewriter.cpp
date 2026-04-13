@@ -70,6 +70,50 @@ RC parse_select_sql(const string &select_sql, SelectSqlNode &select_sql_node)
   return RC::SUCCESS;
 }
 
+RC expand_single_table_star_exprs(Db *db, const ViewMeta &view_meta, SelectSqlNode &select_sql)
+{
+  if (db == nullptr || select_sql.expressions.size() != 1) {
+    return RC::SUCCESS;
+  }
+
+  Expression *expr = select_sql.expressions[0].get();
+  if (expr == nullptr || expr->type() != ExprType::STAR) {
+    return RC::SUCCESS;
+  }
+
+  if (select_sql.relations.size() != 1 || !select_sql.relations[0].join_relations.empty()) {
+    return RC::SUCCESS;
+  }
+
+  const string &base_table = select_sql.relations[0].base_relation.first;
+  Table        *table      = db->find_table(base_table.c_str());
+  if (table == nullptr) {
+    LOG_WARN("base table not found while expanding star for view. view=%s, table=%s", view_meta.name.c_str(), base_table.c_str());
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+
+  const TableMeta &table_meta = table->table_meta();
+  vector<unique_ptr<Expression>> expanded_exprs;
+  expanded_exprs.reserve(table_meta.field_num() - table_meta.sys_field_num());
+  for (int i = table_meta.sys_field_num(); i < table_meta.field_num(); i++) {
+    const FieldMeta *field_meta = table_meta.field(i);
+    auto             field_expr = make_unique<UnboundFieldExpr>(base_table, field_meta->name());
+    field_expr->set_name(field_meta->name());
+    expanded_exprs.emplace_back(std::move(field_expr));
+  }
+
+  if (!view_meta.column_names.empty() && view_meta.column_names.size() != expanded_exprs.size()) {
+    LOG_WARN("view columns mismatch with star expansion. view=%s, columns=%zu, expanded=%zu",
+        view_meta.name.c_str(),
+        view_meta.column_names.size(),
+        expanded_exprs.size());
+    return RC::INVALID_ARGUMENT;
+  }
+
+  select_sql.expressions.swap(expanded_exprs);
+  return RC::SUCCESS;
+}
+
 vector<string> derive_view_columns(const ViewMeta &view_meta, const SelectSqlNode &select_sql)
 {
   if (!view_meta.column_names.empty() && view_meta.column_names.size() == select_sql.expressions.size()) {
@@ -199,6 +243,11 @@ RC rewrite_select_from_single_view(Db *db, SelectSqlNode &outer_select, const Vi
   if (can_passthrough_view_query(outer_select, view_name, view_alias)) {
     outer_select = std::move(inner_select);
     return RC::SUCCESS;
+  }
+
+  rc = expand_single_table_star_exprs(db, view_meta, inner_select);
+  if (OB_FAIL(rc)) {
+    return rc;
   }
 
   if (!inner_select.group_by.empty() || inner_select.having_expr != nullptr || !inner_select.order_by_exprs.empty()) {
@@ -356,6 +405,11 @@ RC build_simple_updatable_view_mapping(Db *db, const string &view_name, const Vi
   }
 
   rc = rewrite_select_sql(db, view_select, 0);
+  if (OB_FAIL(rc)) {
+    return rc;
+  }
+
+  rc = expand_single_table_star_exprs(db, view_meta, view_select);
   if (OB_FAIL(rc)) {
     return rc;
   }
