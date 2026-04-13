@@ -91,6 +91,7 @@ public:
 
   vector<unique_ptr<Expression>> &query_expressions() { return query_expressions_; }
   vector<unique_ptr<Expression>> &group_by() { return group_by_; }
+  unique_ptr<Expression>         &having() { return having_expr_; }
   vector<unique_ptr<Expression>> &order_by() { return order_by_; }
   vector<bool>                   &order_by_asc() { return order_by_asc_; }
 
@@ -100,6 +101,7 @@ private:
   FilterStmt                    *filter_stmt_ = nullptr;
   vector<JoinTables>             join_tables_;
   vector<unique_ptr<Expression>> group_by_;
+  unique_ptr<Expression>         having_expr_;
   vector<unique_ptr<Expression>> order_by_;
   vector<bool>                   order_by_asc_;
 };

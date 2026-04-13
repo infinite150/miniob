@@ -119,6 +119,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
         VALUES
         FROM
         WHERE
+        HAVING
         AND
         SET
         ON
@@ -247,6 +248,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
 %type <expression>          select_expr
 %type <expression_list>     group_by_list
 %type <expression_list>     group_by
+%type <expression>          having_expr
 %type <order_by_parse_result> order_by_clause
 %type <order_by_parse_result> order_by_list
 %type <order_by_parse_result> order_by_item
@@ -684,7 +686,7 @@ update_list:
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT select_expr_list FROM from_node from_list where_expr group_by order_by_clause
+    SELECT select_expr_list FROM from_node from_list where_expr group_by having_expr order_by_clause
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
@@ -712,9 +714,12 @@ select_stmt:        /*  select 语句的语法解析树*/
         delete $7;
       }
       if ($8 != nullptr) {
-        $$->selection.order_by_exprs.swap($8->exprs);
-        $$->selection.order_by_asc.swap($8->asc);
-        delete $8;
+        $$->selection.having_expr = $8;
+      }
+      if ($9 != nullptr) {
+        $$->selection.order_by_exprs.swap($9->exprs);
+        $$->selection.order_by_asc.swap($9->asc);
+        delete $9;
       }
     }
     | SELECT select_expr_list
@@ -1199,6 +1204,17 @@ group_by:
       // group by 的表达式范围与select查询值的表达式范围是不同的，比如group by不支持 *
       // 但是这里没有处理。
       $$ = $3;
+    }
+    ;
+
+having_expr:
+    /* empty */
+    {
+      $$ = nullptr;
+    }
+    | HAVING condition_expr
+    {
+      $$ = $2;
     }
     ;
 

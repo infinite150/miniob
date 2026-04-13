@@ -107,6 +107,14 @@ bool StandardAggregateHashTable::VectorEqual::operator()(const vector<Value> &lh
     return false;
   }
   for (size_t i = 0; i < lhs.size(); ++i) {
+    const bool lhs_null = lhs[i].is_null();
+    const bool rhs_null = rhs[i].is_null();
+    if (lhs_null && rhs_null) {
+      continue;
+    }
+    if (lhs_null || rhs_null) {
+      return false;
+    }
     if (rhs[i].compare(lhs[i]) != 0) {
       return false;
     }

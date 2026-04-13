@@ -23,6 +23,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/table/table.h"
 #include "sql/parser/expression_binder.h"
 #include "sql/expr/expression.h"
+#include "sql/expr/expression_iterator.h"
 
 InnerJoinSqlNode::~InnerJoinSqlNode()
 {
@@ -64,6 +65,30 @@ static string alias_key_normalized(const string &alias)
     k.push_back(static_cast<char>(tolower(static_cast<unsigned char>(c))));
   }
   return k;
+}
+
+static bool contains_aggregate_expr(Expression *expr)
+{
+  if (expr == nullptr) {
+    return false;
+  }
+  if (expr->type() == ExprType::AGGREGATION) {
+    return true;
+  }
+
+  bool has_aggregate = false;
+  function<RC(unique_ptr<Expression> &)> dfs = [&](unique_ptr<Expression> &child) -> RC {
+    if (child == nullptr || has_aggregate) {
+      return RC::SUCCESS;
+    }
+    if (child->type() == ExprType::AGGREGATION) {
+      has_aggregate = true;
+      return RC::SUCCESS;
+    }
+    return ExpressionIterator::iterate_child_expr(*child, dfs);
+  };
+  ExpressionIterator::iterate_child_expr(*expr, dfs);
+  return has_aggregate;
 }
 
 static RC process_from_clause(Db *db, vector<Table *> &tables, unordered_map<string, Table *> &table_map,
@@ -222,6 +247,25 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
     }
   }
 
+  unique_ptr<Expression> having_expression;
+  if (select_sql.having_expr != nullptr) {
+    vector<unique_ptr<Expression>> bound_having;
+    unique_ptr<Expression>         having_ptr(select_sql.having_expr);
+    select_sql.having_expr = nullptr;
+    rc                     = expression_binder.bind_expression(having_ptr, bound_having);
+    if (rc != RC::SUCCESS || bound_having.size() != 1) {
+      LOG_WARN("bind having expression failed");
+      return rc != RC::SUCCESS ? rc : RC::INVALID_ARGUMENT;
+    }
+
+    rc = prepare_subquery_stmts(bound_having[0].get(), db, &table_map);
+    if (OB_FAIL(rc)) {
+      LOG_INFO("prepare subqueries in having failed. rc=%s", strrc(rc));
+      return rc;
+    }
+    having_expression = std::move(bound_having[0]);
+  }
+
   vector<unique_ptr<Expression>> order_by_expressions;
   for (unique_ptr<Expression> &expression : select_sql.order_by_exprs) {
     rc = expression_binder.bind_expression(expression, order_by_expressions);
@@ -253,6 +297,10 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
       LOG_WARN("bind condition expression failed");
       return rc;
     }
+    if (contains_aggregate_expr(bound_conds[0].get())) {
+      LOG_WARN("aggregate function is not allowed in WHERE clause");
+      return RC::INVALID_ARGUMENT;
+    }
     rc = FilterStmt::create(db, default_table, &table_map, bound_conds[0].release(), filter_stmt);
   } else {
     rc = FilterStmt::create(db,
@@ -274,6 +322,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
   select_stmt->query_expressions_.swap(bound_expressions);
   select_stmt->filter_stmt_ = filter_stmt;
   select_stmt->group_by_.swap(group_by_expressions);
+  select_stmt->having_expr_ = std::move(having_expression);
   select_stmt->order_by_.swap(order_by_expressions);
   select_stmt->order_by_asc_ = std::move(select_sql.order_by_asc);
   stmt                         = select_stmt;
