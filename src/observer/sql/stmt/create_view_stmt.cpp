@@ -19,6 +19,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/string.h"
 #include "common/lang/unordered_set.h"
 #include "common/log/log.h"
+#include "sql/expr/expression.h"
 #include "sql/parser/parse.h"
 #include "sql/stmt/select_stmt.h"
 #include "sql/stmt/view_rewriter.h"
@@ -68,6 +69,25 @@ RC CreateViewStmt::create(Db *db, const CreateViewSqlNode &create_view, Stmt *&s
     return rc;
   }
 
+  vector<string> parsed_output_names;
+  bool           has_star_expr = false;
+  parsed_output_names.reserve(select_sql_node->selection.expressions.size());
+  for (size_t i = 0; i < select_sql_node->selection.expressions.size(); i++) {
+    const unique_ptr<Expression> &expr = select_sql_node->selection.expressions[i];
+    if (expr != nullptr && expr->type() == ExprType::STAR) {
+      has_star_expr = true;
+    }
+
+    string name = expr != nullptr && expr->name() != nullptr ? expr->name() : "";
+    if (expr != nullptr && expr->type() == ExprType::UNBOUND_FIELD) {
+      auto *field_expr = static_cast<UnboundFieldExpr *>(expr.get());
+      if (!common::is_blank(field_expr->field_name())) {
+        name = field_expr->field_name();
+      }
+    }
+    parsed_output_names.emplace_back(std::move(name));
+  }
+
   Stmt *select_stmt_base = nullptr;
   rc                     = SelectStmt::create(db, select_sql_node->selection, select_stmt_base);
   if (OB_FAIL(rc)) {
@@ -99,7 +119,15 @@ RC CreateViewStmt::create(Db *db, const CreateViewSqlNode &create_view, Stmt *&s
   } else {
     final_columns.reserve(view_exprs.size());
     for (size_t i = 0; i < view_exprs.size(); i++) {
-      string name = view_exprs[i] != nullptr && view_exprs[i]->name() != nullptr ? view_exprs[i]->name() : "";
+      string name;
+      if (!has_star_expr && i < parsed_output_names.size() && !parsed_output_names[i].empty()) {
+        name = parsed_output_names[i];
+      } else if (view_exprs[i] != nullptr && view_exprs[i]->type() == ExprType::FIELD) {
+        auto *field_expr = static_cast<FieldExpr *>(view_exprs[i].get());
+        name             = field_expr->field_name() != nullptr ? field_expr->field_name() : "";
+      } else {
+        name = view_exprs[i] != nullptr && view_exprs[i]->name() != nullptr ? view_exprs[i]->name() : "";
+      }
       if (name.empty()) {
         name = "c" + to_string(i + 1);
       }
