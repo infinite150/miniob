@@ -385,8 +385,132 @@ RC map_attr_from_view(RelAttrSqlNode &attr, const string &view_name, const strin
   return RC::SUCCESS;
 }
 
+bool extract_rel_attr(Expression *expr, RelAttrSqlNode &attr)
+{
+  if (expr == nullptr || expr->type() != ExprType::UNBOUND_FIELD) {
+    return false;
+  }
+  auto *field_expr    = static_cast<UnboundFieldExpr *>(expr);
+  attr.relation_name  = common::is_blank(field_expr->table_name()) ? "" : field_expr->table_name();
+  attr.attribute_name = field_expr->field_name();
+  return true;
+}
+
+bool extract_value(Expression *expr, Value &value)
+{
+  if (expr == nullptr || expr->type() != ExprType::VALUE) {
+    return false;
+  }
+  value = static_cast<ValueExpr *>(expr)->get_value();
+  return true;
+}
+
+RC append_simple_conditions_from_expr(Expression *expr, vector<ConditionSqlNode> &conditions)
+{
+  if (expr == nullptr) {
+    return RC::SUCCESS;
+  }
+
+  if (expr->type() == ExprType::CONJUNCTION) {
+    auto *conj = static_cast<ConjunctionExpr *>(expr);
+    if (conj->conjunction_type() != ConjunctionExpr::Type::AND) {
+      return RC::UNSUPPORTED;
+    }
+    for (auto &child : conj->children()) {
+      RC rc = append_simple_conditions_from_expr(child.get(), conditions);
+      if (OB_FAIL(rc)) {
+        return rc;
+      }
+    }
+    return RC::SUCCESS;
+  }
+
+  if (expr->type() == ExprType::COMPARISON) {
+    auto *cmp_expr = static_cast<ComparisonExpr *>(expr);
+    ConditionSqlNode condition;
+    condition.comp = cmp_expr->comp();
+
+    RelAttrSqlNode left_attr;
+    if (extract_rel_attr(cmp_expr->left().get(), left_attr)) {
+      condition.left_is_attr = 1;
+      condition.left_attr    = std::move(left_attr);
+    } else if (extract_value(cmp_expr->left().get(), condition.left_value)) {
+      condition.left_is_attr = 0;
+    } else {
+      return RC::UNSUPPORTED;
+    }
+
+    RelAttrSqlNode right_attr;
+    if (extract_rel_attr(cmp_expr->right().get(), right_attr)) {
+      condition.right_is_attr = 1;
+      condition.right_attr    = std::move(right_attr);
+    } else if (extract_value(cmp_expr->right().get(), condition.right_value)) {
+      condition.right_is_attr = 0;
+    } else {
+      return RC::UNSUPPORTED;
+    }
+
+    conditions.emplace_back(std::move(condition));
+    return RC::SUCCESS;
+  }
+
+  if (expr->type() == ExprType::IS_NULL) {
+    auto *is_null_expr = static_cast<IsNullExpr *>(expr);
+    RelAttrSqlNode attr;
+    if (!extract_rel_attr(is_null_expr->child().get(), attr)) {
+      return RC::UNSUPPORTED;
+    }
+
+    ConditionSqlNode condition;
+    condition.left_is_attr  = 1;
+    condition.left_attr     = std::move(attr);
+    condition.comp          = is_null_expr->is_not() ? IS_NOT_NULL_OP : IS_NULL_OP;
+    condition.right_is_attr = 0;
+    condition.right_value.set_null();
+    conditions.emplace_back(std::move(condition));
+    return RC::SUCCESS;
+  }
+
+  return RC::UNSUPPORTED;
+}
+
+RC normalize_filter_attr_to_base(
+    RelAttrSqlNode &attr, const string &base_table, const string &base_alias, const TableMeta &table_meta)
+{
+  const bool has_rel = !common::is_blank(attr.relation_name.c_str());
+  if (has_rel && !ieq(attr.relation_name, base_table) && (base_alias.empty() || !ieq(attr.relation_name, base_alias))) {
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+  if (table_meta.field(attr.attribute_name.c_str()) == nullptr) {
+    return RC::SCHEMA_FIELD_NOT_EXIST;
+  }
+  attr.relation_name = base_table;
+  return RC::SUCCESS;
+}
+
+RC normalize_filter_conditions_to_base(vector<ConditionSqlNode> &conditions, const string &base_table,
+    const string &base_alias, const TableMeta &table_meta)
+{
+  for (ConditionSqlNode &condition : conditions) {
+    if (condition.left_is_attr) {
+      RC rc = normalize_filter_attr_to_base(condition.left_attr, base_table, base_alias, table_meta);
+      if (OB_FAIL(rc)) {
+        return rc;
+      }
+    }
+    if (condition.right_is_attr) {
+      RC rc = normalize_filter_attr_to_base(condition.right_attr, base_table, base_alias, table_meta);
+      if (OB_FAIL(rc)) {
+        return rc;
+      }
+    }
+  }
+  return RC::SUCCESS;
+}
+
 RC build_simple_updatable_view_mapping(Db *db, const string &view_name, const ViewMeta &view_meta, string &base_table,
-    vector<string> &view_columns, unordered_map<string, string> &view_to_base)
+    vector<string> &view_columns, unordered_map<string, string> &view_to_base,
+    vector<ConditionSqlNode> *view_filter_conditions = nullptr, bool require_mappable_filter = false)
 {
   SelectSqlNode view_select;
   RC            rc = parse_select_sql(view_meta.select_sql, view_select);
@@ -405,15 +529,43 @@ RC build_simple_updatable_view_mapping(Db *db, const string &view_name, const Vi
   }
 
   if (view_select.relations.size() != 1 || !view_select.relations[0].join_relations.empty() ||
-      view_select.condition_expr != nullptr || !view_select.conditions.empty() || !view_select.group_by.empty() ||
-      !view_select.order_by_exprs.empty()) {
+      !view_select.group_by.empty() || !view_select.order_by_exprs.empty()) {
     LOG_WARN("view is not updatable: %s", view_name.c_str());
     return RC::UNSUPPORTED;
   }
 
   base_table = view_select.relations[0].base_relation.first;
-  if (db->find_table(base_table.c_str()) == nullptr) {
+  Table *base_table_handle = db->find_table(base_table.c_str());
+  if (base_table_handle == nullptr) {
     LOG_WARN("view base table not found: %s", base_table.c_str());
+    return RC::UNSUPPORTED;
+  }
+  const string base_alias = view_select.relations[0].base_relation.second;
+
+  if (view_filter_conditions != nullptr) {
+    view_filter_conditions->clear();
+    if (!view_select.conditions.empty()) {
+      view_filter_conditions->insert(
+          view_filter_conditions->end(), view_select.conditions.begin(), view_select.conditions.end());
+    }
+    if (view_select.condition_expr != nullptr) {
+      rc = append_simple_conditions_from_expr(view_select.condition_expr, *view_filter_conditions);
+      if (OB_FAIL(rc)) {
+        if (require_mappable_filter) {
+          return rc;
+        }
+        view_filter_conditions->clear();
+      }
+    }
+    rc = normalize_filter_conditions_to_base(
+        *view_filter_conditions, base_table, base_alias, base_table_handle->table_meta());
+    if (OB_FAIL(rc)) {
+      if (require_mappable_filter) {
+        return rc;
+      }
+      view_filter_conditions->clear();
+    }
+  } else if (require_mappable_filter && (view_select.condition_expr != nullptr || !view_select.conditions.empty())) {
     return RC::UNSUPPORTED;
   }
 
@@ -422,7 +574,6 @@ RC build_simple_updatable_view_mapping(Db *db, const string &view_name, const Vi
     return RC::INVALID_ARGUMENT;
   }
 
-  const string base_alias = view_select.relations[0].base_relation.second;
   for (size_t i = 0; i < view_select.expressions.size(); i++) {
     Expression *expr = view_select.expressions[i].get();
     if (expr == nullptr || expr->type() != ExprType::UNBOUND_FIELD) {
@@ -448,9 +599,10 @@ RC rewrite_update_sql(Db *db, UpdateSqlNode &update_sql)
 
   string                              base_table;
   vector<string>                      view_columns;
-  unordered_map<string, string> view_to_base;
+  unordered_map<string, string>       view_to_base;
+  vector<ConditionSqlNode>            view_filter_conditions;
   RC rc = build_simple_updatable_view_mapping(
-      db, update_sql.relation_name, *view_meta, base_table, view_columns, view_to_base);
+      db, update_sql.relation_name, *view_meta, base_table, view_columns, view_to_base, &view_filter_conditions, true);
   if (OB_FAIL(rc)) {
     return rc;
   }
@@ -485,6 +637,10 @@ RC rewrite_update_sql(Db *db, UpdateSqlNode &update_sql)
       }
     }
   }
+  if (!view_filter_conditions.empty()) {
+    update_sql.conditions.insert(
+        update_sql.conditions.end(), view_filter_conditions.begin(), view_filter_conditions.end());
+  }
 
   update_sql.relation_name = base_table;
   return RC::SUCCESS;
@@ -499,9 +655,10 @@ RC rewrite_delete_sql(Db *db, DeleteSqlNode &delete_sql)
 
   string                              base_table;
   vector<string>                      view_columns;
-  unordered_map<string, string> view_to_base;
+  unordered_map<string, string>       view_to_base;
+  vector<ConditionSqlNode>            view_filter_conditions;
   RC rc = build_simple_updatable_view_mapping(
-      db, delete_sql.relation_name, *view_meta, base_table, view_columns, view_to_base);
+      db, delete_sql.relation_name, *view_meta, base_table, view_columns, view_to_base, &view_filter_conditions, true);
   if (OB_FAIL(rc)) {
     return rc;
   }
@@ -520,6 +677,10 @@ RC rewrite_delete_sql(Db *db, DeleteSqlNode &delete_sql)
       }
     }
   }
+  if (!view_filter_conditions.empty()) {
+    delete_sql.conditions.insert(
+        delete_sql.conditions.end(), view_filter_conditions.begin(), view_filter_conditions.end());
+  }
 
   delete_sql.relation_name = base_table;
   return RC::SUCCESS;
@@ -534,9 +695,9 @@ RC rewrite_insert_sql(Db *db, InsertSqlNode &insert_sql)
 
   string                              base_table;
   vector<string>                      view_columns;
-  unordered_map<string, string> view_to_base;
+  unordered_map<string, string>       view_to_base;
   RC rc = build_simple_updatable_view_mapping(
-      db, insert_sql.relation_name, *view_meta, base_table, view_columns, view_to_base);
+      db, insert_sql.relation_name, *view_meta, base_table, view_columns, view_to_base, nullptr, false);
   if (OB_FAIL(rc)) {
     return rc;
   }
