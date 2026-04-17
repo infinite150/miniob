@@ -159,8 +159,7 @@ Expression *combine_and(Expression *left, Expression *right)
 
 bool can_passthrough_view_query(const SelectSqlNode &outer_select, const string &view_name, const string &view_alias)
 {
-  if (outer_select.condition_expr != nullptr || !outer_select.group_by.empty() || outer_select.having_expr != nullptr ||
-      !outer_select.order_by_exprs.empty()) {
+  if (outer_select.condition_expr != nullptr || !outer_select.group_by.empty() || !outer_select.order_by_exprs.empty()) {
     return false;
   }
   if (outer_select.expressions.size() != 1) {
@@ -201,7 +200,12 @@ RC rewrite_select_from_single_view(Db *db, SelectSqlNode &outer_select, const Vi
     return RC::SUCCESS;
   }
 
-  if (!inner_select.group_by.empty() || inner_select.having_expr != nullptr || !inner_select.order_by_exprs.empty()) {
+  rc = expand_single_table_star_exprs(db, view_meta, inner_select);
+  if (OB_FAIL(rc)) {
+    return rc;
+  }
+
+  if (!inner_select.group_by.empty() || !inner_select.order_by_exprs.empty()) {
     LOG_WARN("complex view is only supported by direct passthrough query. view=%s", view_name.c_str());
     return RC::UNSUPPORTED;
   }
@@ -256,15 +260,6 @@ RC rewrite_select_from_single_view(Db *db, SelectSqlNode &outer_select, const Vi
     if (OB_FAIL(rc)) {
       return rc;
     }
-  }
-  if (outer_select.having_expr != nullptr) {
-    unique_ptr<Expression> having_expr(outer_select.having_expr);
-    outer_select.having_expr = nullptr;
-    rc                       = rewrite_expr_for_view(having_expr, column_exprs, view_name, view_alias);
-    if (OB_FAIL(rc)) {
-      return rc;
-    }
-    outer_select.having_expr = having_expr.release();
   }
   for (auto &order_expr : outer_select.order_by_exprs) {
     rc = rewrite_expr_for_view(order_expr, column_exprs, view_name, view_alias);
@@ -362,7 +357,7 @@ RC build_simple_updatable_view_mapping(Db *db, const string &view_name, const Vi
 
   if (view_select.relations.size() != 1 || !view_select.relations[0].join_relations.empty() ||
       view_select.condition_expr != nullptr || !view_select.conditions.empty() || !view_select.group_by.empty() ||
-      view_select.having_expr != nullptr || !view_select.order_by_exprs.empty()) {
+      !view_select.order_by_exprs.empty()) {
     LOG_WARN("view is not updatable: %s", view_name.c_str());
     return RC::UNSUPPORTED;
   }
