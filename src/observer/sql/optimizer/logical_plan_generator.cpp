@@ -187,6 +187,20 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
     last_oper = &group_by_oper;
   }
 
+  unique_ptr<LogicalOperator> having_oper;
+  rc = create_having_plan(select_stmt, having_oper);
+  if (OB_FAIL(rc)) {
+    LOG_WARN("failed to create having logical plan. rc=%s", strrc(rc));
+    return rc;
+  }
+  if (having_oper) {
+    if (*last_oper) {
+      having_oper->add_child(std::move(*last_oper));
+    }
+
+    last_oper = &having_oper;
+  }
+
   unique_ptr<LogicalOperator> order_by_oper;
   rc = create_order_by_plan(select_stmt, order_by_oper);
   if (OB_FAIL(rc)) {
@@ -416,62 +430,102 @@ RC LogicalPlanGenerator::create_plan(ExplainStmt *explain_stmt, unique_ptr<Logic
 
 RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
+  logical_operator = nullptr;
+
   vector<unique_ptr<Expression>> &group_by_expressions = select_stmt->group_by();
-  vector<Expression *> aggregate_expressions;
+  vector<Expression *>            aggregate_expressions;
   vector<unique_ptr<Expression>> &query_expressions = select_stmt->query_expressions();
-  function<RC(unique_ptr<Expression>&)> collector = [&](unique_ptr<Expression> &expr) -> RC {
-    RC rc = RC::SUCCESS;
+  unique_ptr<Expression>         &having_expression = select_stmt->having();
+  function<RC(unique_ptr<Expression> &)> collector = [&](unique_ptr<Expression> &expr) -> RC {
+    if (expr == nullptr) {
+      return RC::SUCCESS;
+    }
+
     if (expr->type() == ExprType::AGGREGATION) {
-      expr->set_pos(aggregate_expressions.size() + group_by_expressions.size());
+      expr->set_pos(static_cast<int>(aggregate_expressions.size() + group_by_expressions.size()));
       aggregate_expressions.push_back(expr.get());
     }
-    rc = ExpressionIterator::iterate_child_expr(*expr, collector);
-    return rc;
+    return ExpressionIterator::iterate_child_expr(*expr, collector);
   };
 
-  function<RC(unique_ptr<Expression>&)> bind_group_by_expr = [&](unique_ptr<Expression> &expr) -> RC {
-    RC rc = RC::SUCCESS;
+  function<RC(unique_ptr<Expression> &)> bind_group_by_expr = [&](unique_ptr<Expression> &expr) -> RC {
+    if (expr == nullptr) {
+      return RC::SUCCESS;
+    }
+
+    if (expr->type() == ExprType::AGGREGATION) {
+      return RC::SUCCESS;
+    }
+
     for (size_t i = 0; i < group_by_expressions.size(); i++) {
       auto &group_by = group_by_expressions[i];
-      if (expr->type() == ExprType::AGGREGATION) {
-        break;
-      } else if (expr->equal(*group_by)) {
-        expr->set_pos(i);
-        continue;
-      } else {
-        rc = ExpressionIterator::iterate_child_expr(*expr, bind_group_by_expr);
+      if (expr->equal(*group_by)) {
+        expr->set_pos(static_cast<int>(i));
+        return RC::SUCCESS;
       }
     }
-    return rc;
+
+    return ExpressionIterator::iterate_child_expr(*expr, bind_group_by_expr);
   };
 
- bool found_unbound_column = false;
-  function<RC(unique_ptr<Expression>&)> find_unbound_column = [&](unique_ptr<Expression> &expr) -> RC {
-    RC rc = RC::SUCCESS;
+  bool found_unbound_column = false;
+  function<RC(unique_ptr<Expression> &)> find_unbound_column = [&](unique_ptr<Expression> &expr) -> RC {
+    if (expr == nullptr || found_unbound_column) {
+      return RC::SUCCESS;
+    }
     if (expr->type() == ExprType::AGGREGATION) {
-      // do nothing
+      return RC::SUCCESS;
     } else if (expr->pos() != -1) {
-      // do nothing
+      return RC::SUCCESS;
     } else if (expr->type() == ExprType::FIELD) {
       found_unbound_column = true;
-    }else {
-      rc = ExpressionIterator::iterate_child_expr(*expr, find_unbound_column);
+      return RC::SUCCESS;
+    } else {
+      return ExpressionIterator::iterate_child_expr(*expr, find_unbound_column);
     }
-    return rc;
   };
   
 
+  RC rc = RC::SUCCESS;
   for (unique_ptr<Expression> &expression : query_expressions) {
-    bind_group_by_expr(expression);
+    rc = bind_group_by_expr(expression);
+    if (OB_FAIL(rc)) {
+      return rc;
+    }
+  }
+  if (having_expression != nullptr) {
+    rc = bind_group_by_expr(having_expression);
+    if (OB_FAIL(rc)) {
+      return rc;
+    }
   }
 
   for (unique_ptr<Expression> &expression : query_expressions) {
-    find_unbound_column(expression);
+    rc = find_unbound_column(expression);
+    if (OB_FAIL(rc)) {
+      return rc;
+    }
+  }
+  if (having_expression != nullptr) {
+    rc = find_unbound_column(having_expression);
+    if (OB_FAIL(rc)) {
+      return rc;
+    }
   }
 
-  // collect all aggregate expressions
+  // Collect aggregate expressions from SELECT and HAVING so later operators
+  // can evaluate predicates without changing projection behavior.
   for (unique_ptr<Expression> &expression : query_expressions) {
-    collector(expression);
+    rc = collector(expression);
+    if (OB_FAIL(rc)) {
+      return rc;
+    }
+  }
+  if (having_expression != nullptr) {
+    rc = collector(having_expression);
+    if (OB_FAIL(rc)) {
+      return rc;
+    }
   }
 
   if (group_by_expressions.empty() && aggregate_expressions.empty()) {
@@ -486,9 +540,26 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
 
   // 如果只需要聚合，但是没有group by 语句，需要生成一个空的group by 语句
 
-  auto group_by_oper = make_unique<GroupByLogicalOperator>(std::move(group_by_expressions),
-                                                           std::move(aggregate_expressions));
-  logical_operator = std::move(group_by_oper);
+  logical_operator =
+      make_unique<GroupByLogicalOperator>(std::move(group_by_expressions), std::move(aggregate_expressions));
+  return RC::SUCCESS;
+}
+
+RC LogicalPlanGenerator::create_having_plan(SelectStmt *select_stmt, unique_ptr<LogicalOperator> &logical_operator)
+{
+  logical_operator = nullptr;
+
+  unique_ptr<Expression> &having_expr = select_stmt->having();
+  if (having_expr == nullptr) {
+    return RC::SUCCESS;
+  }
+
+  if (having_expr->value_type() != AttrType::BOOLEANS) {
+    LOG_WARN("HAVING expression must be boolean");
+    return RC::INVALID_ARGUMENT;
+  }
+
+  logical_operator = make_unique<PredicateLogicalOperator>(std::move(having_expr));
   return RC::SUCCESS;
 }
 

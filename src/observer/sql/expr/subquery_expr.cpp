@@ -33,6 +33,8 @@ SubQueryExpr::SubQueryExpr(SelectSqlNode &sql_node)
   sql_node_->condition_expr = sql_node.condition_expr;
   sql_node.condition_expr   = nullptr;
   sql_node_->group_by = std::move(sql_node.group_by);
+  sql_node_->having_expr = sql_node.having_expr;
+  sql_node.having_expr   = nullptr;
 }
 
 SubQueryExpr::~SubQueryExpr() = default;
@@ -152,6 +154,9 @@ void SubQueryExpr::bind_nested_subquery_parents()
     if (expr) {
       bind(*expr);
     }
+  }
+  if (stmt_->having()) {
+    bind(*stmt_->having());
   }
   for (const auto &jt : stmt_->join_tables()) {
     for (FilterStmt *on : jt.on_conds()) {
