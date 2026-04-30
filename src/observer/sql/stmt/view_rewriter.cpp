@@ -201,11 +201,6 @@ RC rewrite_select_from_single_view(Db *db, SelectSqlNode &outer_select, const Vi
     return RC::SUCCESS;
   }
 
-  rc = expand_single_table_star_exprs(db, view_meta, inner_select);
-  if (OB_FAIL(rc)) {
-    return rc;
-  }
-
   if (!inner_select.group_by.empty() || inner_select.having_expr != nullptr || !inner_select.order_by_exprs.empty()) {
     LOG_WARN("complex view is only supported by direct passthrough query. view=%s", view_name.c_str());
     return RC::UNSUPPORTED;
