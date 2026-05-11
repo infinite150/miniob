@@ -273,14 +273,18 @@ RC rewrite_select_from_single_view(Db *db, SelectSqlNode &outer_select, const Vi
 
   // Aggregate views without GROUP BY produce exactly one row.
   // Outer aggregates like count(*) should count the view's single row,
-  // not the underlying base-table rows.
+  // not the underlying base-table rows.  Replace the outer expression
+  // with max(1) which is an aggregate that collapses to one row and
+  // always returns 1 — matching what count(*) would yield.
   if (has_aggregate_exprs(inner_select) && inner_select.group_by.empty()) {
     if (all_outer_exprs_are_row_counters(outer_select)) {
       outer_select.expressions.clear();
-      outer_select.expressions.emplace_back(make_unique<ValueExpr>(Value(1)));
-      outer_select.relations.clear();
-      outer_select.condition_expr = nullptr;
-      outer_select.conditions.clear();
+      outer_select.expressions.emplace_back(
+          make_unique<UnboundAggregateExpr>("max", make_unique<ValueExpr>(Value(1))));
+      outer_select.relations        = std::move(inner_select.relations);
+      outer_select.condition_expr    = inner_select.condition_expr;
+      inner_select.condition_expr    = nullptr;
+      outer_select.conditions        = std::move(inner_select.conditions);
       return RC::SUCCESS;
     }
   }
