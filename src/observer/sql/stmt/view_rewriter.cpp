@@ -278,9 +278,18 @@ RC rewrite_select_from_single_view(Db *db, SelectSqlNode &outer_select, const Vi
   // always returns 1 — matching what count(*) would yield.
   if (has_aggregate_exprs(inner_select) && inner_select.group_by.empty()) {
     if (all_outer_exprs_are_row_counters(outer_select)) {
+      // Preserve the original column name (e.g. "count(*)") so the
+      // result header matches what the user expects.
+      string original_name;
+      if (outer_select.expressions[0] != nullptr && outer_select.expressions[0]->name() != nullptr) {
+        original_name = outer_select.expressions[0]->name();
+      }
       outer_select.expressions.clear();
-      outer_select.expressions.emplace_back(
-          make_unique<UnboundAggregateExpr>("max", make_unique<ValueExpr>(Value(1))));
+      auto replacement = make_unique<UnboundAggregateExpr>("max", make_unique<ValueExpr>(Value(1)));
+      if (!original_name.empty()) {
+        replacement->set_name(original_name);
+      }
+      outer_select.expressions.emplace_back(std::move(replacement));
       outer_select.relations        = std::move(inner_select.relations);
       outer_select.condition_expr    = inner_select.condition_expr;
       inner_select.condition_expr    = nullptr;
