@@ -17,7 +17,9 @@ See the Mulan PSL v2 for more details. */
 
 RC DescTableStmt::create(Db *db, const DescTableSqlNode &desc_table, Stmt *&stmt)
 {
-  if (db->find_table(desc_table.relation_name.c_str()) == nullptr) {
+  stmt = nullptr;
+  if (db->find_table(desc_table.relation_name.c_str()) == nullptr &&
+      db->find_view(desc_table.relation_name.c_str()) == nullptr) {
     return RC::SCHEMA_TABLE_NOT_EXIST;
   }
   stmt = new DescTableStmt(desc_table.relation_name);

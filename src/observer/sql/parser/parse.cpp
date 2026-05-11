@@ -399,10 +399,30 @@ void try_parse_view_sql_fallback(const char *st, ParsedSqlResult *sql_result)
 
 }  // namespace
 
+static bool try_parse_view_sql_first(const char *st, ParsedSqlResult *sql_result)
+{
+  if (st == nullptr || sql_result == nullptr) {
+    return false;
+  }
+  const string raw_sql = st;
+  if (try_parse_create_view(raw_sql, sql_result)) {
+    return true;
+  }
+  if (try_parse_drop_view(raw_sql, sql_result)) {
+    return true;
+  }
+  return false;
+}
+
 RC parse(const char *st, ParsedSqlResult *sql_result)
 {
-  sql_parse(st, sql_result);
-  try_parse_view_sql_fallback(st, sql_result);
-  try_patch_having_from_raw_sql(st, sql_result);
+  // Parse CREATE VIEW / DROP VIEW with the manual parser first, because the yacc
+  // grammar relies on token_name() which cannot correctly extract the SELECT SQL
+  // text for multi-token ranges (column tracking is per-token in this lexer).
+  if (!try_parse_view_sql_first(st, sql_result)) {
+    sql_parse(st, sql_result);
+    try_parse_view_sql_fallback(st, sql_result);
+    try_patch_having_from_raw_sql(st, sql_result);
+  }
   return RC::SUCCESS;
 }

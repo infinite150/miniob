@@ -58,9 +58,26 @@ RC DescTableExecutor::execute(SQLStageEvent *sql_event)
 
     sql_result->set_operator(unique_ptr<PhysicalOperator>(oper));
   } else {
+    // Check if it's a view
+    const ViewMeta *view_meta = db->find_view(table_name);
+    if (view_meta != nullptr) {
+      TupleSchema tuple_schema;
+      tuple_schema.append_cell(TupleCellSpec("", "Field", "Field"));
+      tuple_schema.append_cell(TupleCellSpec("", "Type", "Type"));
+      tuple_schema.append_cell(TupleCellSpec("", "Length", "Length"));
 
-    sql_result->set_return_code(RC::SCHEMA_TABLE_NOT_EXIST);
-    sql_result->set_state_string("Table not exists");
+      sql_result->set_tuple_schema(tuple_schema);
+
+      auto oper = new StringListPhysicalOperator;
+      for (const string &col : view_meta->column_names) {
+        oper->append({col, "VIEW", ""});
+      }
+
+      sql_result->set_operator(unique_ptr<PhysicalOperator>(oper));
+    } else {
+      sql_result->set_return_code(RC::SCHEMA_TABLE_NOT_EXIST);
+      sql_result->set_state_string("Table or view not exists");
+    }
   }
   return rc;
 }
