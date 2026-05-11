@@ -773,7 +773,7 @@ select_expr:
     {
       $$ = new StarExpr();
     }
-    | ID DOT '*'
+    | alias_ident DOT '*'
     {
       $$ = new StarExpr($1);
     }
@@ -788,7 +788,7 @@ select_expr:
       yyerror(&@$, sql_string, sql_result, scanner, "star cannot have column alias");
       YYERROR;
     }
-    | ID DOT '*' AS alias_ident
+    | alias_ident DOT '*' AS alias_ident
     {
       $$ = nullptr;
       yyerror(&@$, sql_string, sql_result, scanner, "qualified star cannot have column alias");
@@ -897,11 +897,11 @@ func_expr:
     ;
 
 rel_attr:
-    ID {
+    alias_ident {
       $$ = new RelAttrSqlNode;
       $$->attribute_name = $1;
     }
-    | ID DOT ID {
+    | alias_ident DOT alias_ident {
       $$ = new RelAttrSqlNode;
       $$->relation_name  = $1;
       $$->attribute_name = $3;
