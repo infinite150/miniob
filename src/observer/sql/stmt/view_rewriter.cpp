@@ -226,23 +226,6 @@ bool has_aggregate_exprs(const SelectSqlNode &select)
   return false;
 }
 
-bool all_outer_exprs_are_row_counters(const SelectSqlNode &outer_select)
-{
-  for (const auto &expr : outer_select.expressions) {
-    if (expr == nullptr) {
-      return false;
-    }
-    if (expr->type() != ExprType::UNBOUND_AGGREGATION) {
-      return false;
-    }
-    auto *agg = static_cast<UnboundAggregateExpr *>(expr.get());
-    if (agg->child() == nullptr || agg->child()->type() != ExprType::STAR) {
-      return false;
-    }
-  }
-  return true;
-}
-
 RC rewrite_select_sql(Db *db, SelectSqlNode &select_sql, int depth);
 
 RC rewrite_select_from_single_view(Db *db, SelectSqlNode &outer_select, const ViewMeta &view_meta, int depth)
@@ -272,28 +255,60 @@ RC rewrite_select_from_single_view(Db *db, SelectSqlNode &outer_select, const Vi
   }
 
   // Aggregate views without GROUP BY produce exactly one row.
-  // Outer aggregates like count(*) should count the view's single row,
-  // not the underlying base-table rows.  Replace the outer expression
-  // with max(1) which is an aggregate that collapses to one row and
-  // always returns 1 — matching what count(*) would yield.
+  // Any outer aggregate applied to a view column is redundant and can be
+  // replaced by the inner expression directly.  Similarly count(*) is
+  // always 1 (replaced by max(1) to keep the aggregation semantics).
   if (has_aggregate_exprs(inner_select) && inner_select.group_by.empty()) {
-    if (all_outer_exprs_are_row_counters(outer_select)) {
-      // Preserve the original column name (e.g. "count(*)") so the
-      // result header matches what the user expects.
-      string original_name;
-      if (outer_select.expressions[0] != nullptr && outer_select.expressions[0]->name() != nullptr) {
-        original_name = outer_select.expressions[0]->name();
+    vector<string> agg_view_columns = derive_view_columns(view_meta, inner_select);
+    unordered_map<string, const Expression *> agg_column_exprs;
+    for (size_t i = 0; i < agg_view_columns.size(); i++) {
+      agg_column_exprs[normalize_lower(agg_view_columns[i])] = inner_select.expressions[i].get();
+    }
+
+    bool all_handled = true;
+    for (auto &outer_expr : outer_select.expressions) {
+      if (outer_expr == nullptr) {
+        all_handled = false;
+        break;
       }
-      outer_select.expressions.clear();
-      auto replacement = make_unique<UnboundAggregateExpr>("max", make_unique<ValueExpr>(Value(1)));
-      if (!original_name.empty()) {
-        replacement->set_name(original_name);
+      // count(*) → max(1)
+      if (outer_expr->type() == ExprType::UNBOUND_AGGREGATION) {
+        auto *agg = static_cast<UnboundAggregateExpr *>(outer_expr.get());
+        if (agg->child() != nullptr && agg->child()->type() == ExprType::STAR) {
+          string original_name = outer_expr->name() ? outer_expr->name() : "";
+          outer_expr           = make_unique<UnboundAggregateExpr>("max", make_unique<ValueExpr>(Value(1)));
+          if (!original_name.empty()) {
+            outer_expr->set_name(original_name);
+          }
+          continue;
+        }
       }
-      outer_select.expressions.emplace_back(std::move(replacement));
-      outer_select.relations        = std::move(inner_select.relations);
-      outer_select.condition_expr    = inner_select.condition_expr;
-      inner_select.condition_expr    = nullptr;
-      outer_select.conditions        = std::move(inner_select.conditions);
+      // agg(view_column) → inner expression (aggregate on single row = identity)
+      if (outer_expr->type() == ExprType::UNBOUND_AGGREGATION) {
+        auto *agg = static_cast<UnboundAggregateExpr *>(outer_expr.get());
+        if (agg->child() != nullptr && agg->child()->type() == ExprType::UNBOUND_FIELD) {
+          auto *    field_expr = static_cast<UnboundFieldExpr *>(agg->child().get());
+          const string &col_name  = field_expr->field_name();
+          auto        iter      = agg_column_exprs.find(normalize_lower(col_name));
+          if (iter != agg_column_exprs.end()) {
+            string original_name = outer_expr->name() ? outer_expr->name() : "";
+            outer_expr           = iter->second->copy();
+            if (!original_name.empty()) {
+              outer_expr->set_name(original_name);
+            }
+            continue;
+          }
+        }
+      }
+      all_handled = false;
+      break;
+    }
+
+    if (all_handled) {
+      outer_select.relations     = std::move(inner_select.relations);
+      outer_select.condition_expr = inner_select.condition_expr;
+      inner_select.condition_expr = nullptr;
+      outer_select.conditions     = std::move(inner_select.conditions);
       return RC::SUCCESS;
     }
   }
