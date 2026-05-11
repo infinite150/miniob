@@ -246,6 +246,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
 %type <expression_list>     expression_list
 %type <expression_list>     select_expr_list
 %type <expression>          select_expr
+%type <cstring>             alias_ident
 %type <expression_list>     group_by_list
 %type <expression_list>     group_by
 %type <expression>          having_expr
@@ -749,6 +750,20 @@ select_expr_list:
     }
     ;
 
+/** Non-reserved keywords usable as identifiers (alias names, etc.) */
+alias_ident:
+    ID
+    | DATA
+    | FIELDS
+    | TERMINATED
+    | ENCLOSED
+    | LENGTH
+    | ROUND
+    | DATE_FORMAT
+    | FORMAT
+    | STORAGE
+    ;
+
 select_expr:
     expression
     {
@@ -762,18 +777,18 @@ select_expr:
     {
       $$ = new StarExpr($1);
     }
-    | expression AS ID
+    | expression AS alias_ident
     {
       $1->set_name($3);
       $$ = $1;
     }
-    | '*' AS ID
+    | '*' AS alias_ident
     {
       $$ = nullptr;
       yyerror(&@$, sql_string, sql_result, scanner, "star cannot have column alias");
       YYERROR;
     }
-    | ID DOT '*' AS ID
+    | ID DOT '*' AS alias_ident
     {
       $$ = nullptr;
       yyerror(&@$, sql_string, sql_result, scanner, "qualified star cannot have column alias");
@@ -845,7 +860,7 @@ expression:
     | sub_query_expr %prec UMINUS {
       $$ = $1;
     }
-    | expression ID %prec ID {
+    | expression alias_ident %prec ID {
       $$ = $1;
       $$->set_name($2);
     }
