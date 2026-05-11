@@ -807,7 +807,29 @@ RC rewrite_sql_for_view(Db *db, ParsedSqlNode &sql_node)
 
   switch (sql_node.flag) {
     case SCF_SELECT: {
-      return rewrite_select_sql(db, sql_node.selection, 0);
+      RC rc = rewrite_select_sql(db, sql_node.selection, 0);
+      if (OB_FAIL(rc)) {
+        return rc;
+      }
+      // If the rewritten SELECT has no FROM and only constants,
+      // convert to CALC so it executes as a single-row expression eval
+      // (FROM-less SELECTs may not execute correctly).
+      SelectSqlNode &sel = sql_node.selection;
+      if (sel.relations.empty() && sel.condition_expr == nullptr && sel.group_by.empty() &&
+          !sel.expressions.empty()) {
+        bool all_value = true;
+        for (const auto &e : sel.expressions) {
+          if (e->type() != ExprType::VALUE) {
+            all_value = false;
+            break;
+          }
+        }
+        if (all_value) {
+          sql_node.flag = SCF_CALC;
+          sql_node.calc.expressions.swap(sel.expressions);
+        }
+      }
+      return rc;
     }
     case SCF_UPDATE: {
       return rewrite_update_sql(db, sql_node.update);
