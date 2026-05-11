@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "common/log/log.h"
 #include "common/lang/string.h"
@@ -124,7 +125,6 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
         SET
         ON
         LOAD
-        DATA
         INFILE
         EXPLAIN
         STORAGE
@@ -753,7 +753,6 @@ select_expr_list:
 /** Non-reserved keywords usable as identifiers (alias names, etc.) */
 alias_ident:
     ID
-    | DATA
     | FIELDS
     | TERMINATED
     | ENCLOSED
@@ -1280,10 +1279,15 @@ order_by_clause:
     ;
 
 load_data_stmt:
-    LOAD DATA INFILE SSS INTO TABLE ID fields_terminated_by enclosed_by
+    LOAD ID INFILE SSS INTO TABLE ID fields_terminated_by enclosed_by
     {
+      if ($2 == nullptr || 0 != strcasecmp($2, "data")) {
+        $$ = nullptr;
+        yyerror(&@2, sql_string, sql_result, scanner, "expected 'DATA' after LOAD");
+        YYERROR;
+      }
       char *tmp_file_name = common::substr($4, 1, strlen($4) - 2);
-      
+
       $$ = new ParsedSqlNode(SCF_LOAD_DATA);
       $$->load_data.relation_name = $7;
       $$->load_data.file_name = tmp_file_name;
