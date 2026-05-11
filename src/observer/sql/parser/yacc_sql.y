@@ -127,15 +127,10 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
         LOAD
         INFILE
         EXPLAIN
-        STORAGE
-        FORMAT
         PRIMARY
         KEY
         ANALYZE
         AS
-        FIELDS
-        TERMINATED
-        ENCLOSED
         IS
         EQ
         LT
@@ -150,9 +145,6 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
         INNER
         JOIN
         OR
-        LENGTH
-        ROUND
-        DATE_FORMAT
         UNIQUE
 
 /** union 中定义各种数据类型，真实生成的代码也是union类型，所以不能有非POD类型的数据 **/
@@ -211,6 +203,14 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
 %token <floats> FLOAT
 %token <cstring> ID
 %token <cstring> SSS
+%token <cstring> STORAGE
+%token <cstring> FORMAT
+%token <cstring> FIELDS
+%token <cstring> TERMINATED
+%token <cstring> ENCLOSED
+%token <cstring> LENGTH
+%token <cstring> ROUND
+%token <cstring> DATE_FORMAT
 %token NULL_T
 //非终结符
 

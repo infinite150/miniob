@@ -235,7 +235,7 @@ bool all_outer_exprs_are_row_counters(const SelectSqlNode &outer_select)
     if (expr->type() != ExprType::UNBOUND_AGGREGATION) {
       return false;
     }
-    auto *agg = static_cast<const UnboundAggregateExpr *>(expr.get());
+    auto *agg = static_cast<UnboundAggregateExpr *>(expr.get());
     if (agg->child() == nullptr || agg->child()->type() != ExprType::STAR) {
       return false;
     }
