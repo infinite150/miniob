@@ -216,6 +216,33 @@ bool can_passthrough_view_query(const SelectSqlNode &outer_select, const string 
   return star_targets_view(static_cast<const StarExpr *>(expr), view_name, view_alias);
 }
 
+bool has_aggregate_exprs(const SelectSqlNode &select)
+{
+  for (const auto &expr : select.expressions) {
+    if (expr != nullptr && expr->type() == ExprType::UNBOUND_AGGREGATION) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool all_outer_exprs_are_row_counters(const SelectSqlNode &outer_select)
+{
+  for (const auto &expr : outer_select.expressions) {
+    if (expr == nullptr) {
+      return false;
+    }
+    if (expr->type() != ExprType::UNBOUND_AGGREGATION) {
+      return false;
+    }
+    auto *agg = static_cast<const UnboundAggregateExpr *>(expr.get());
+    if (agg->child() == nullptr || agg->child()->type() != ExprType::STAR) {
+      return false;
+    }
+  }
+  return true;
+}
+
 RC rewrite_select_sql(Db *db, SelectSqlNode &select_sql, int depth);
 
 RC rewrite_select_from_single_view(Db *db, SelectSqlNode &outer_select, const ViewMeta &view_meta, int depth)
@@ -242,6 +269,20 @@ RC rewrite_select_from_single_view(Db *db, SelectSqlNode &outer_select, const Vi
   if (can_passthrough_view_query(outer_select, view_name, view_alias)) {
     outer_select = std::move(inner_select);
     return RC::SUCCESS;
+  }
+
+  // Aggregate views without GROUP BY produce exactly one row.
+  // Outer aggregates like count(*) should count the view's single row,
+  // not the underlying base-table rows.
+  if (has_aggregate_exprs(inner_select) && inner_select.group_by.empty()) {
+    if (all_outer_exprs_are_row_counters(outer_select)) {
+      outer_select.expressions.clear();
+      outer_select.expressions.emplace_back(make_unique<ValueExpr>(Value(1)));
+      outer_select.relations.clear();
+      outer_select.condition_expr = nullptr;
+      outer_select.conditions.clear();
+      return RC::SUCCESS;
+    }
   }
 
   rc = expand_single_table_star_exprs(db, view_meta, inner_select);
