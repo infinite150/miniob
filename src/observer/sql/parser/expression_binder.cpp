@@ -278,6 +278,9 @@ RC ExpressionBinder::bind_unbound_field_expression(
     }
 
     Field      field(table, field_meta);
+    if (!is_blank(table_name)) {
+      field.set_table_alias(table_name);
+    }
     FieldExpr *field_expr = new FieldExpr(field);
     const string &parsed_name = unbound_field_expr->name();
     const bool    explicit_col_alias = !parsed_name.empty() && parsed_name.find('.') == string::npos &&

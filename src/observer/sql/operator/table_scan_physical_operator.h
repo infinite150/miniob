@@ -64,6 +64,7 @@ public:
   RC close() override;
 
   Tuple *current_tuple() override;
+  void set_table_alias(const std::string &a) { table_alias_ = a; }
 
   int table_id() const { return table_->table_id(); }
 
@@ -79,6 +80,7 @@ private:
   RecordScanner                 *record_scanner_ = nullptr;
   Record                         current_record_;
   RowTuple                       tuple_;
+  std::string                    table_alias_;
   vector<unique_ptr<Expression>> predicates_;  // TODO chang predicate to table tuple filter
   mutable JoinedTuple          combined_tuple_;
 };

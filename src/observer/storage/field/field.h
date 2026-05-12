@@ -33,11 +33,13 @@ public:
 
   AttrType attr_type() const { return field_->type(); }
 
-  const char *table_name() const { return table_->name(); }
+  const char *table_name() const { return alias_.empty() ? table_->name() : alias_.c_str(); }
   const char *field_name() const { return field_->name(); }
 
   void set_table(const Table *table) { this->table_ = table; }
   void set_field(const FieldMeta *field) { this->field_ = field; }
+  void set_table_alias(const char *alias) { alias_ = alias ? alias : ""; }
+  const string &table_alias() const { return alias_; }
 
   void set_int(Record &record, int value);
   int  get_int(const Record &record);
@@ -47,4 +49,5 @@ public:
 private:
   const Table     *table_ = nullptr;
   const FieldMeta *field_ = nullptr;
+  string           alias_;
 };

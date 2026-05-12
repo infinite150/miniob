@@ -112,8 +112,9 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
 
   const vector<SelectStmt::JoinTables> &join_tables_list = select_stmt->join_tables();
 
-  auto process_one_table = [this](unique_ptr<LogicalOperator> &prev_oper, Table *table, FilterStmt *on_filter) -> RC {
+  auto process_one_table = [this](unique_ptr<LogicalOperator> &prev_oper, Table *table, FilterStmt *on_filter, const std::string &alias = "") -> RC {
     unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_ONLY));
+    if (!alias.empty()) { static_cast<TableGetLogicalOperator *>(table_get_oper.get())->set_alias(alias); }
     unique_ptr<LogicalOperator> on_predicate_oper;
     if (on_filter != nullptr && on_filter->condition()) {
       RC rc_local = create_plan(on_filter, on_predicate_oper);
@@ -147,7 +148,8 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
       return RC::INTERNAL;
     }
     for (size_t i = 0; i < join_tables.size(); i++) {
-      rc = process_one_table(prev_oper, join_tables[i], on_conds[i]);
+      const std::string &alias = (i < jt.table_aliases().size()) ? jt.table_aliases()[i] : "";
+      rc = process_one_table(prev_oper, join_tables[i], on_conds[i], alias);
       if (rc != RC::SUCCESS) {
         return rc;
       }

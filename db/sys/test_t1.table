@@ -33,6 +33,6 @@
 	"primary_keys" : null,
 	"storage_engine" : 0,
 	"storage_format" : 1,
-	"table_id" : 0,
+	"table_id" : 2,
 	"table_name" : "test_t1"
 }

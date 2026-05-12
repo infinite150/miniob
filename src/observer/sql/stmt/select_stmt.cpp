@@ -135,7 +135,7 @@ static RC process_from_clause(Db *db, vector<Table *> &tables, unordered_map<str
       return rc;
     }
     Table *base_table = table_map[relations.base_relation.first];
-    jt.push_join_table(base_table, nullptr);
+    jt.push_join_table(base_table, nullptr, relations.base_relation.second);
     if (!relations.base_relation.second.empty()) {
       rc = check_dup_alias(relations.base_relation.second);
       if (rc != RC::SUCCESS) {
@@ -179,7 +179,7 @@ static RC process_from_clause(Db *db, vector<Table *> &tables, unordered_map<str
           return rc;
         }
       }
-      jt.push_join_table(join_table, on_filter);
+      jt.push_join_table(join_table, on_filter, relations.join_relations[j].second);
     }
     relations.conditions.clear();
     join_tables.push_back(std::move(jt));

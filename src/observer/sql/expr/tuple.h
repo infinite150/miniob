@@ -170,8 +170,10 @@ public:
     speces_.clear();
   }
 
+  std::string table_alias_;
   void set_record(Record *record) { this->record_ = record; }
 
+  void set_table_alias(const std::string &alias) { table_alias_ = alias; }
   void set_schema(const Table *table, const vector<FieldMeta> *fields)
   {
     table_ = table;
@@ -266,7 +268,8 @@ public:
     }
     // 无表前缀或表名匹配时查找字段
     const bool table_ok = (table_name == nullptr || table_name[0] == '\0' ||
-        (table_->name() != nullptr && 0 == strcasecmp(table_name, table_->name())));
+        (table_->name() != nullptr && 0 == strcasecmp(table_name, table_->name()))
+        || (!table_alias_.empty() && 0 == strcasecmp(table_name, table_alias_.c_str())));
     if (!table_ok) {
       return RC::NOTFOUND;
     }

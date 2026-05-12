@@ -37,7 +37,7 @@ public:
     JoinTables(const JoinTables &)            = delete;
     JoinTables &operator=(const JoinTables &) = delete;
     JoinTables(JoinTables &&other) noexcept
-        : join_tables_(std::move(other.join_tables_)), on_conds_(std::move(other.on_conds_))
+        : join_tables_(std::move(other.join_tables_)), on_conds_(std::move(other.on_conds_)), table_aliases_(std::move(other.table_aliases_))
     {}
     JoinTables &operator=(JoinTables &&other) noexcept
     {
@@ -48,6 +48,7 @@ public:
           }
         }
         join_tables_ = std::move(other.join_tables_);
+        table_aliases_ = std::move(other.table_aliases_);
         on_conds_    = std::move(other.on_conds_);
       }
       return *this;
@@ -61,17 +62,20 @@ public:
       }
       on_conds_.clear();
     }
-    void push_join_table(Table *table, FilterStmt *on_filter)
+    void push_join_table(Table *table, FilterStmt *on_filter, const std::string &alias = "")
     {
       join_tables_.push_back(table);
       on_conds_.push_back(on_filter);
+    table_aliases_.push_back(alias);
     }
     const vector<Table *>      &join_tables() const { return join_tables_; }
     const vector<FilterStmt *> &on_conds() const { return on_conds_; }
+    const std::vector<std::string> &table_aliases() const { return table_aliases_; }
 
   private:
     vector<Table *>      join_tables_;
     vector<FilterStmt *> on_conds_;
+    std::vector<std::string> table_aliases_;
   };
 
   SelectStmt() = default;
