@@ -279,42 +279,7 @@ RC rewrite_select_from_single_view(Db *db, SelectSqlNode &outer_select, const Vi
     column_exprs[normalize_lower(view_columns[i])] = inner_select.expressions[i].get();
   }
 
-  // For aggregate views (no GROUP BY), outer aggregates on view
-  // columns are redundant — the view already produces exactly one row.
-  // Pre-replace them to avoid creating nested aggregates.
-  if (has_aggregate_exprs(inner_select) && inner_select.group_by.empty()) {
-    for (auto &expr : outer_select.expressions) {
-      if (expr == nullptr || expr->type() != ExprType::UNBOUND_AGGREGATION) {
-        continue;
-      }
-      auto *agg = static_cast<UnboundAggregateExpr *>(expr.get());
-      if (agg->child() == nullptr) {
-        continue;
-      }
-      // count(*) → max(1)
-      if (agg->child()->type() == ExprType::STAR) {
-        string name = expr->name() != nullptr ? expr->name() : "";
-        expr        = make_unique<UnboundAggregateExpr>("max", make_unique<ValueExpr>(Value(1)));
-        if (!name.empty()) {
-          expr->set_name(name);
-        }
-        continue;
-      }
-      // agg(view_column) → inner expression
-      if (agg->child()->type() == ExprType::UNBOUND_FIELD) {
-        auto       *field_expr = static_cast<UnboundFieldExpr *>(agg->child().get());
-        const string &col_name  = field_expr->field_name();
-        auto        iter       = column_exprs.find(normalize_lower(col_name));
-        if (iter != column_exprs.end()) {
-          string name = expr->name() != nullptr ? expr->name() : "";
-          expr        = iter->second->copy();
-          if (!name.empty()) {
-            expr->set_name(name);
-          }
-        }
-      }
-    }
-  }
+  bool is_agg_view = has_aggregate_exprs(inner_select) && inner_select.group_by.empty();
 
   vector<unique_ptr<Expression>> rewritten_expressions;
   for (auto &expr : outer_select.expressions) {
@@ -325,6 +290,45 @@ RC rewrite_select_from_single_view(Db *db, SelectSqlNode &outer_select, const Vi
         rewritten->set_name(view_columns[i]);
         rewritten_expressions.emplace_back(std::move(rewritten));
       }
+      continue;
+    }
+
+    // For aggregate views (no GROUP BY), outer aggregates on view
+    // columns are redundant — the inner expression already produces
+    // the correct result.  Replace here and skip rewrite_expr_for_view
+    // to avoid re-interpreting inner field references as view columns.
+    bool pre_handled = false;
+    if (is_agg_view && expr != nullptr && expr->type() == ExprType::UNBOUND_AGGREGATION) {
+      auto *agg = static_cast<UnboundAggregateExpr *>(expr.get());
+      if (agg->child() != nullptr) {
+        // count(*) → max(1)
+        if (agg->child()->type() == ExprType::STAR) {
+          string name = expr->name() != nullptr ? expr->name() : "";
+          auto replacement = make_unique<UnboundAggregateExpr>("max", make_unique<ValueExpr>(Value(1)));
+          if (!name.empty()) {
+            replacement->set_name(name);
+          }
+          rewritten_expressions.emplace_back(std::move(replacement));
+          pre_handled = true;
+        }
+        // agg(view_column) → inner expression
+        else if (agg->child()->type() == ExprType::UNBOUND_FIELD) {
+          auto       *field_expr = static_cast<UnboundFieldExpr *>(agg->child().get());
+          const string &col_name  = field_expr->field_name();
+          auto        iter       = column_exprs.find(normalize_lower(col_name));
+          if (iter != column_exprs.end()) {
+            string name = expr->name() != nullptr ? expr->name() : "";
+            auto replacement = iter->second->copy();
+            if (!name.empty()) {
+              replacement->set_name(name);
+            }
+            rewritten_expressions.emplace_back(std::move(replacement));
+            pre_handled = true;
+          }
+        }
+      }
+    }
+    if (pre_handled) {
       continue;
     }
 

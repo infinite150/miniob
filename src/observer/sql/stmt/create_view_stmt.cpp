@@ -82,7 +82,9 @@ RC CreateViewStmt::create(Db *db, const CreateViewSqlNode &create_view, Stmt *&s
     if (expr != nullptr && expr->type() == ExprType::UNBOUND_FIELD) {
       auto *field_expr = static_cast<UnboundFieldExpr *>(expr.get());
       if (!common::is_blank(field_expr->field_name())) {
-        name = field_expr->field_name();
+        if (name.find('.') != string::npos) {
+          name = field_expr->field_name();
+        }
       }
     }
     parsed_output_names.emplace_back(std::move(name));
