@@ -46,6 +46,11 @@ static void collect_table_gets(LogicalOperator *oper, unordered_map<string, Tabl
     auto *table_get = static_cast<TableGetLogicalOperator *>(oper);
     if (table_get->table() != nullptr) {
       table_map[string(table_get->table()->name())] = table_get;
+      // Also register alias (e.g., "t1" for self-joins) so that
+      // qualified column references can be matched correctly.
+      if (!table_get->alias().empty()) {
+        table_map[table_get->alias()] = table_get;
+      }
     }
     return;
   }

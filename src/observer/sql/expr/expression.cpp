@@ -86,7 +86,8 @@ bool FieldExpr::equal(const Expression &other) const
     return false;
   }
   const auto &other_field_expr = static_cast<const FieldExpr &>(other);
-  return table_name() == other_field_expr.table_name() && field_name() == other_field_expr.field_name();
+  return 0 == strcasecmp(table_name(), other_field_expr.table_name()) &&
+         0 == strcasecmp(field_name(), other_field_expr.field_name());
 }
 
 // TODO: 在进行表达式计算时，`chunk` 包含了所有列，因此可以通过 `field_id` 获取到对应列。
