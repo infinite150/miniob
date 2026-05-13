@@ -458,6 +458,28 @@ create_table_select_stmt:
       $$->create_table_select.select_sql = token_name(sql_string, &@5);
       delete $5;
     }
+    | CREATE TABLE ID LBRACE attr_def_list primary_key RBRACE select_stmt
+    {
+      $$ = new ParsedSqlNode(SCF_CREATE_TABLE_SELECT);
+      $$->create_table_select.relation_name = $3;
+      $$->create_table_select.select_sql = token_name(sql_string, &@8);
+      if ($5 != nullptr) {
+        $$->create_table_select.attr_infos.swap(*$5);
+        delete $5;
+      }
+      delete $8;
+    }
+    | CREATE TABLE ID LBRACE attr_def_list primary_key RBRACE AS select_stmt
+    {
+      $$ = new ParsedSqlNode(SCF_CREATE_TABLE_SELECT);
+      $$->create_table_select.relation_name = $3;
+      $$->create_table_select.select_sql = token_name(sql_string, &@9);
+      if ($5 != nullptr) {
+        $$->create_table_select.attr_infos.swap(*$5);
+        delete $5;
+      }
+      delete $9;
+    }
     ;
 
 create_view_stmt:

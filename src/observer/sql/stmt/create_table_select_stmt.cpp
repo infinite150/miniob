@@ -19,6 +19,7 @@ RC CreateTableSelectStmt::create(Db *db, const CreateTableSelectSqlNode &create_
     return RC::SCHEMA_TABLE_EXIST;
   }
 
-  stmt = new CreateTableSelectStmt(create_table_select.relation_name, create_table_select.select_sql);
+  stmt = new CreateTableSelectStmt(
+      create_table_select.relation_name, create_table_select.select_sql, create_table_select.attr_infos);
   return RC::SUCCESS;
 }

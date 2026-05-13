@@ -68,30 +68,30 @@ RC CreateTableSelectExecutor::execute(SQLStageEvent *sql_event)
   auto            *view_select_stmt = static_cast<SelectStmt *>(select_stmt_holder.get());
 
   const auto &query_exprs = view_select_stmt->query_expressions();
-  if (query_exprs.empty()) {
-    LOG_WARN("ctas select has no output columns");
-    return RC::INVALID_ARGUMENT;
-  }
 
-  // 2. Derive column definitions from the SELECT output
+  // 2. Column definitions: use explicit columns if provided, otherwise derive from SELECT
   vector<AttrInfoSqlNode> attr_infos;
-  for (size_t i = 0; i < query_exprs.size(); i++) {
-    AttrInfoSqlNode attr;
-    // Column name
-    const char *expr_name = query_exprs[i] != nullptr ? query_exprs[i]->name() : nullptr;
-    if (!common::is_blank(expr_name)) {
-      attr.name = expr_name;
-    } else {
-      attr.name = "c" + to_string(i + 1);
+  if (!cts_stmt->attr_infos().empty()) {
+    attr_infos = cts_stmt->attr_infos();
+  } else {
+    if (query_exprs.empty()) {
+      LOG_WARN("ctas select has no output columns");
+      return RC::INVALID_ARGUMENT;
     }
-
-    // Column type from expression
-    AttrType value_type = query_exprs[i] != nullptr ? query_exprs[i]->value_type() : AttrType::INTS;
-    attr.type   = value_type;
-    attr.length = query_exprs[i] != nullptr ? query_exprs[i]->value_length() : 4;
-    attr.nullable = false;
-
-    attr_infos.push_back(attr);
+    for (size_t i = 0; i < query_exprs.size(); i++) {
+      AttrInfoSqlNode attr;
+      const char *expr_name = query_exprs[i] != nullptr ? query_exprs[i]->name() : nullptr;
+      if (!common::is_blank(expr_name)) {
+        attr.name = expr_name;
+      } else {
+        attr.name = "c" + to_string(i + 1);
+      }
+      AttrType value_type = query_exprs[i] != nullptr ? query_exprs[i]->value_type() : AttrType::INTS;
+      attr.type   = value_type;
+      attr.length = query_exprs[i] != nullptr ? query_exprs[i]->value_length() : 4;
+      attr.nullable = false;
+      attr_infos.push_back(attr);
+    }
   }
 
   // 3. Create the table

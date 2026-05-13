@@ -219,8 +219,9 @@ struct CreateTableSqlNode
  */
 struct CreateTableSelectSqlNode
 {
-  string   relation_name;
-  string   select_sql;
+  string                  relation_name;
+  string                  select_sql;
+  vector<AttrInfoSqlNode> attr_infos;  ///< 可选的显式列定义
 };
 
 /**
