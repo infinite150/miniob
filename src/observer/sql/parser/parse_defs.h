@@ -213,6 +213,16 @@ struct CreateTableSqlNode
 };
 
 /**
+ * @brief create table as select
+ * @ingroup SQLParser
+ */
+struct CreateTableSelectSqlNode
+{
+  string   relation_name;
+  string   select_sql;
+};
+
+/**
  * @brief 描述一个create view语句
  * @ingroup SQLParser
  */
@@ -347,6 +357,7 @@ enum SqlCommandFlag
   SCF_UPDATE,
   SCF_DELETE,
   SCF_CREATE_TABLE,
+  SCF_CREATE_TABLE_SELECT,
   SCF_CREATE_VIEW,
   SCF_DROP_TABLE,
   SCF_DROP_VIEW,
@@ -380,8 +391,9 @@ public:
   InsertSqlNode       insertion;
   DeleteSqlNode       deletion;
   UpdateSqlNode       update;
-  CreateTableSqlNode  create_table;
-  CreateViewSqlNode   create_view;
+  CreateTableSqlNode       create_table;
+  CreateTableSelectSqlNode  create_table_select;
+  CreateViewSqlNode        create_view;
   DropTableSqlNode    drop_table;
   DropViewSqlNode     drop_view;
   AnalyzeTableSqlNode analyze_table;

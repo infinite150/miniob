@@ -261,6 +261,7 @@ Expression *create_func_expr(FunctionExpr::Type func_type,
 %type <sql_node>            update_stmt
 %type <sql_node>            delete_stmt
 %type <sql_node>            create_table_stmt
+%type <sql_node>            create_table_select_stmt
 %type <sql_node>            create_view_stmt
 %type <sql_node>            drop_table_stmt
 %type <sql_node>            drop_view_stmt
@@ -305,6 +306,7 @@ command_wrapper:
   | update_stmt
   | delete_stmt
   | create_table_stmt
+  | create_table_select_stmt
   | create_view_stmt
   | drop_table_stmt
   | drop_view_stmt
@@ -445,6 +447,16 @@ create_table_stmt:    /*create table 语句的语法解析树*/
       if ($8 != nullptr) {
         create_table.storage_format = $8;
       }
+    }
+    ;
+
+create_table_select_stmt:
+    CREATE TABLE ID AS select_stmt
+    {
+      $$ = new ParsedSqlNode(SCF_CREATE_TABLE_SELECT);
+      $$->create_table_select.relation_name = $3;
+      $$->create_table_select.select_sql = token_name(sql_string, &@5);
+      delete $5;
     }
     ;
 
