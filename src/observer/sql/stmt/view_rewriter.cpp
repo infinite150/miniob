@@ -302,7 +302,8 @@ RC rewrite_select_from_single_view(Db *db, SelectSqlNode &outer_select, const Vi
       auto *agg = static_cast<UnboundAggregateExpr *>(expr.get());
       if (agg->child() != nullptr) {
         // count(*) → max(1)
-        if (agg->child()->type() == ExprType::STAR) {
+        bool is_count = (agg->aggregate_name() != nullptr && 0 == strcasecmp(agg->aggregate_name(), "count"));
+        if (is_count || agg->child()->type() == ExprType::STAR) {
           string name = expr->name() != nullptr ? expr->name() : "";
           auto replacement = make_unique<UnboundAggregateExpr>("max", make_unique<ValueExpr>(Value(1)));
           if (!name.empty()) {
