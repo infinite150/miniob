@@ -127,7 +127,7 @@ void Value::set_data(char *data, int length)
       length_           = length;
     } break;
     case AttrType::FLOATS: {
-      value_.float_value_ = *(float *)data;
+      value_.float_value_ = static_cast<double>(*(float *)data);
       length_             = length;
     } break;
     case AttrType::BOOLEANS: {
@@ -156,8 +156,16 @@ void Value::set_float(float val)
 {
   reset();
   attr_type_          = AttrType::FLOATS;
+  value_.float_value_ = static_cast<double>(val);
+  length_             = sizeof(float);
+}
+
+void Value::set_float(double val)
+{
+  reset();
+  attr_type_          = AttrType::FLOATS;
   value_.float_value_ = val;
-  length_             = sizeof(val);
+  length_             = sizeof(float);
 }
 void Value::set_boolean(bool val)
 {
@@ -287,6 +295,10 @@ char *Value::data() const
     case AttrType::TEXTS: {
       return value_.pointer_value_;
     } break;
+    case AttrType::FLOATS: {
+      float_data_temp_ = static_cast<float>(value_.float_value_);
+      return (char *)&float_data_temp_;
+    } break;
     default: {
       return (char *)&value_;
     } break;
@@ -404,7 +416,7 @@ float Value::get_float() const
       return float(value_.int_value_);
     } break;
     case AttrType::FLOATS: {
-      return value_.float_value_;
+      return static_cast<float>(value_.float_value_);
     } break;
     case AttrType::BOOLEANS: {
       return float(value_.bool_value_);
