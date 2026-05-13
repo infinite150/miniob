@@ -18,6 +18,7 @@
 #include "sql/stmt/view_rewriter.h"
 #include "storage/db/db.h"
 #include "storage/table/table.h"
+#include "storage/trx/trx.h"
 
 using namespace std;
 
@@ -122,10 +123,17 @@ RC CreateTableSelectExecutor::execute(SQLStageEvent *sql_event)
     return RC::SCHEMA_TABLE_NOT_EXIST;
   }
 
-  // Execute the physical operator and insert rows
-  rc = physical_oper->open(nullptr);
+  // Execute the physical operator and insert rows.
+  // Use the session's current transaction, like SqlResult::open() does.
+  Session *session    = sql_event->session_event()->session();
+  Trx     *trx        = session->current_trx();
+  Session *prev_session = Session::current_session();
+  Session::set_current_session(session);
+
+  trx->start_if_need();
+  rc = physical_oper->open(trx);
   if (OB_FAIL(rc)) {
-    table->sync();
+    Session::set_current_session(prev_session);
     return rc;
   }
 
@@ -136,9 +144,8 @@ RC CreateTableSelectExecutor::execute(SQLStageEvent *sql_event)
       break;
     }
 
-    const TableMeta &table_meta      = table->table_meta();
-    int              user_field_num  = table_meta.field_num() - table_meta.sys_field_num();
-    vector<Value>    values(user_field_num);
+    int           user_field_num = table->table_meta().field_num() - table->table_meta().sys_field_num();
+    vector<Value> values(user_field_num);
 
     for (int i = 0; i < user_field_num; i++) {
       rc = tuple->cell_at(i, values[i]);
@@ -167,7 +174,7 @@ RC CreateTableSelectExecutor::execute(SQLStageEvent *sql_event)
     rc = RC::SUCCESS;
   }
   physical_oper->close();
-  table->sync();
+  Session::set_current_session(prev_session);
 
   if (OB_SUCC(rc)) {
     LOG_INFO("ctas: inserted %d rows into %s", inserted, table_name.c_str());

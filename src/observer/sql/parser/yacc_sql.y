@@ -588,6 +588,13 @@ insert_stmt:        /*insert   语句的语法解析树*/
         delete $5;
       }
     }
+    | INSERT INTO ID select_stmt
+    {
+      $$ = new ParsedSqlNode(SCF_INSERT);
+      $$->insertion.relation_name = $3;
+      $$->insertion.select_sql = token_name(sql_string, &@4);
+      delete $4;
+    }
     ;
 
 value_list_groups:

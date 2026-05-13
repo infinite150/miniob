@@ -34,5 +34,5 @@
 	"storage_engine" : 0,
 	"storage_format" : 1,
 	"table_id" : 0,
-	"table_name" : "create_table_select_t1"
+	"table_name" : "t1"
 }

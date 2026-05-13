@@ -18,12 +18,21 @@
 			"offset" : 4,
 			"type" : "ints",
 			"visible" : true
+		},
+		{
+			"FIELD_id" : 2,
+			"len" : 10,
+			"name" : "name",
+			"nullable" : false,
+			"offset" : 8,
+			"type" : "chars",
+			"visible" : true
 		}
 	],
 	"indexes" : null,
 	"primary_keys" : null,
 	"storage_engine" : 0,
 	"storage_format" : 1,
-	"table_id" : 2,
-	"table_name" : "create_table_select_t3"
+	"table_id" : 1,
+	"table_name" : "t2"
 }

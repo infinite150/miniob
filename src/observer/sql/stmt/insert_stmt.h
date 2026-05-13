@@ -43,10 +43,13 @@ public:
   int          value_amount() const { return value_amount_; }
   const vector<vector<Value>> &value_rows() const { return value_rows_; }
   bool         is_batch() const { return !value_rows_.empty(); }
+  bool         is_insert_select() const { return !select_sql_.empty(); }
+  const string &select_sql() const { return select_sql_; }
 
 private:
   Table                *table_        = nullptr;
   const Value          *values_       = nullptr;
   int                   value_amount_ = 0;
   vector<vector<Value>> value_rows_;   ///< 批量插入时使用
+  string                select_sql_;   ///< INSERT ... SELECT 子查询 SQL
 };

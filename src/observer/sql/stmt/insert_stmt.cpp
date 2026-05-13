@@ -39,6 +39,15 @@ RC InsertStmt::create(Db *db, const InsertSqlNode &inserts, Stmt *&stmt)
     return RC::SCHEMA_TABLE_NOT_EXIST;
   }
 
+  // INSERT ... SELECT：先创建 stmt，select 由 ExecuteStage 执行
+  if (!inserts.select_sql.empty()) {
+    InsertStmt *insert_stmt = new InsertStmt();
+    insert_stmt->table_      = table;
+    insert_stmt->select_sql_ = inserts.select_sql;
+    stmt                     = insert_stmt;
+    return RC::SUCCESS;
+  }
+
   const TableMeta &table_meta = table->table_meta();
   const int        field_num  = table_meta.field_num() - table_meta.sys_field_num();
 

@@ -156,6 +156,7 @@ struct InsertSqlNode
   string                 relation_name;  ///< Relation to insert into
   vector<Value>          values;         ///< 单行插入的值
   vector<vector<Value>>  value_rows;     ///< 批量插入：多行，非空时优先使用
+  string                 select_sql;     ///< INSERT ... SELECT 的子查询 SQL
 };
 
 /**
