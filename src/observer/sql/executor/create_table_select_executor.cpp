@@ -80,12 +80,16 @@ RC CreateTableSelectExecutor::execute(SQLStageEvent *sql_event)
     }
     for (size_t i = 0; i < query_exprs.size(); i++) {
       AttrInfoSqlNode attr;
-      const char *expr_name = query_exprs[i] != nullptr ? query_exprs[i]->name() : nullptr;
-      if (!common::is_blank(expr_name)) {
-        attr.name = expr_name;
+      string col_name;
+      if (query_exprs[i] != nullptr && query_exprs[i]->type() == ExprType::FIELD) {
+        auto *fe = static_cast<FieldExpr *>(query_exprs[i].get());
+        const char *fn = fe->field_name();
+        col_name = (!common::is_blank(fn)) ? fn : "c" + to_string(i + 1);
       } else {
-        attr.name = "c" + to_string(i + 1);
+        const char *n = query_exprs[i] != nullptr ? query_exprs[i]->name() : nullptr;
+        col_name = (!common::is_blank(n)) ? n : "c" + to_string(i + 1);
       }
+      attr.name = col_name;
       AttrType value_type = query_exprs[i] != nullptr ? query_exprs[i]->value_type() : AttrType::INTS;
       attr.type   = value_type;
       attr.length = query_exprs[i] != nullptr ? query_exprs[i]->value_length() : 4;

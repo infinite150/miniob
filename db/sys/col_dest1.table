@@ -4,8 +4,8 @@
 		{
 			"FIELD_id" : 0,
 			"len" : 4,
-			"name" : "id",
-			"nullable" : true,
+			"name" : "a",
+			"nullable" : false,
 			"offset" : 0,
 			"type" : "ints",
 			"visible" : true
@@ -13,19 +13,10 @@
 		{
 			"FIELD_id" : 1,
 			"len" : 4,
-			"name" : "age",
-			"nullable" : true,
+			"name" : "b",
+			"nullable" : false,
 			"offset" : 4,
 			"type" : "ints",
-			"visible" : true
-		},
-		{
-			"FIELD_id" : 2,
-			"len" : 10,
-			"name" : "name",
-			"nullable" : true,
-			"offset" : 8,
-			"type" : "chars",
 			"visible" : true
 		}
 	],
@@ -33,6 +24,6 @@
 	"primary_keys" : null,
 	"storage_engine" : 0,
 	"storage_format" : 1,
-	"table_id" : 0,
-	"table_name" : "t1"
+	"table_id" : 1,
+	"table_name" : "col_dest1"
 }

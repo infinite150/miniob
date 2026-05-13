@@ -4,8 +4,8 @@
 		{
 			"FIELD_id" : 0,
 			"len" : 4,
-			"name" : "id",
-			"nullable" : false,
+			"name" : "a",
+			"nullable" : true,
 			"offset" : 0,
 			"type" : "ints",
 			"visible" : true
@@ -13,8 +13,8 @@
 		{
 			"FIELD_id" : 1,
 			"len" : 4,
-			"name" : "age",
-			"nullable" : false,
+			"name" : "b",
+			"nullable" : true,
 			"offset" : 4,
 			"type" : "ints",
 			"visible" : true
@@ -24,6 +24,6 @@
 	"primary_keys" : null,
 	"storage_engine" : 0,
 	"storage_format" : 1,
-	"table_id" : 2,
-	"table_name" : "t3"
+	"table_id" : 0,
+	"table_name" : "col_src"
 }
