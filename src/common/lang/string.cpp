@@ -273,14 +273,12 @@ string double_to_str(double v)
 {
   char buf[256];
   // Compensate tiny float accumulation noise before 2-digit rounding.
-  // Only apply for |v| >= kLargeMagnitudeThreshold: a global epsilon would
-  // shift values near half-cent boundaries (e.g. ~10.125) from 10.13 to 10.12.
-  constexpr double kRoundEpsilon            = 1e-5;
-  constexpr double kLargeMagnitudeThreshold = 100.0;
-  double           adj                      = v;
-  if (std::fabs(v) >= kLargeMagnitudeThreshold) {
-    adj = v - std::copysign(kRoundEpsilon, v);
-  }
+  // Expression evaluation stores intermediate numeric results as float, so a
+  // mathematically exact xx.x85 may arrive here as xx.x84999... and round down.
+  // Bias slightly toward the sign of the value so decimal half-up output stays
+  // stable without affecting non-boundary values.
+  constexpr double kRoundEpsilon = 2e-5;
+  double           adj           = v + std::copysign(kRoundEpsilon, v);
   double rounded_v = std::round(adj * 100.0) / 100.0;
   snprintf(buf, sizeof(buf), "%.2f", rounded_v);
   size_t len = strlen(buf);
